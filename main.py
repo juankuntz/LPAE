@@ -6,23 +6,24 @@ import matplotlib.pyplot as plt
 import math
 
 (x, y), (_, _) = tf.keras.datasets.mnist.load_data()
-x = x[:1000].astype('float32')[..., np.newaxis]
+x = x[:10000].astype('float32')[..., np.newaxis]
 data = tf.data.Dataset.from_tensor_slices(x)
 
-lae = models.LAE()
-lae.compile(lv_learning_rate=5e-11, n_particles=5,
-            optimizer=tf.keras.optimizers.RMSprop(learning_rate=1e-4),
+lae = models.LAE(latent_var_dim=32)
+lae.compile(lv_learning_rate=1e-3, n_particles=1,
+            optimizer=tf.keras.optimizers.RMSprop(),
             preprocessor=tf.keras.layers.Normalization(axis=(0, 1)),
             postprocessor=tf.keras.layers.Normalization(axis=(0, 1),
                                                         invert=True),
             run_eagerly=True)
+print(lae.decoder.summary())
 log_dir = "logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-history = lae.fit(data=data, epochs=10, batch_size=256, callbacks=[tb])
+history = lae.fit(data=data, epochs=3, batch_size=128, callbacks=[tb])
 print(history.history)
 
 i = 4
-samples = lae.decode_posterior_samples(n_samples=2, index=i)
+samples = lae.decode_posterior_samples(n_samples=3, index=i)
 images = [x[i, ..., 0]] + [samples[i, ...].numpy()[..., 0] for i in range(samples.shape[0])]
 grid_size = math.ceil(len(images) ** (1/2))
 for i, image in enumerate(images):

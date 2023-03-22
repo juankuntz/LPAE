@@ -68,7 +68,7 @@ class LAE(keras.Model):
                                                   self._training_set_size)))
             # trainable=True)
 
-        # Do any requested preprocessing:
+        # Adapt any pre-or-postprocessors:
         if self._preprocessor is not None:
             # If the preprocessor needs adapting, adapt it.
             if hasattr(self._preprocessor, 'adapt'):
@@ -146,6 +146,9 @@ class LAE(keras.Model):
             - latent_vars: tensor of dimensions (batch_size * n_particles,
             self.latent_var_dim).
         Returns: tensor of dimensions (batch_size * n_particles)."""
+        # Normalize data batch:
+        if self._preprocessor is not None:
+            data = self._preprocessor(data)
         # Compute log prior probability:
         log_dens = self._prior.log_prob(latent_vars)
         likelihood = tfd.MultivariateNormalDiag(
