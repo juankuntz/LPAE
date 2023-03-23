@@ -72,7 +72,6 @@ class LAE(keras.Model):
             self._train_latent_variables = tf.Variable(
                 initial_value=self._prior.sample((self._n_particles,
                                                   self._training_set_size)))
-            # trainable=True)
 
         # Adapt any pre-or-postprocessors:
         if self._preprocessor is not None:
@@ -83,50 +82,20 @@ class LAE(keras.Model):
         if hasattr(self._postprocessor, 'adapt'):
             self._postprocessor.adapt(data)
 
-        # Add particle and data indices to dataset:
-        # data = self._add_indices_to_dataset(data, self._n_particles)
-        # # Shuffle and batch data:
-        # self._train_batch_size = batch_size
-        # data = data.shuffle(shuffle_buffer_size)
-        # data = data.batch(self._n_particles * self._train_batch_size,
-        #                   drop_remainder=True)
-
-                # Add indices to dataset and shuffle:
-        # data_idx = [(i, dataset[i, ...]) for i
-        #             in range(self._training_set_size)]
-        # shuffle(data_idx)
+        # Add indices to dataset and shuffle:
         data = Dataset.zip((Dataset.range(self._training_set_size), data))
         # Shuffle and batch data:
         self._train_batch_size = batch_size
         data = data.shuffle(shuffle_buffer_size)
         data = data.batch(self._train_batch_size, drop_remainder=True)
-        # TODO: Right now particles are shuffled: we don't update 0, ..., N-1
-        # once every step.
 
         # Declare variables to hold latent variables updated in each step.
         self._latent_var_batch = tf.Variable(initial_value=tf.zeros(
-            shape=(
-                self._n_particles * self._train_batch_size,
-                self.latent_var_dim)))
+            shape=(self._n_particles * self._train_batch_size,
+                   self.latent_var_dim)))
         # Run normal fit:
         return super().fit(x=data, **kwargs)
         # TODO: Delete latent variables at end of training to save memory?
-
-    @staticmethod
-    def _add_indices_to_dataset(data: Dataset, pn: int):
-        """Add particle and data indices to dataset. In particular, if data
-        equals [A, B, C] and there are two particles, data is set to
-        [[0, 0, 0, 1, 1, 1], [0, 1, 2, 0, 1, 2], [A, B, C, A, B, C]];
-        that is [particle_indices, data_indices, datapoints].
-        Args:
-            - data: dataset to which we need to add indices.
-            - pn: particle number.
-        Returns: data set with indices."""
-        tss = data.cardinality().numpy()
-        return Dataset.zip((Dataset.range(pn).map(lambda x: tf.repeat(x, tss)
-                                                  ).flat_map(
-            lambda y: Dataset.from_tensor_slices(y)),
-                            Dataset.range(tss).repeat(pn), data.repeat(pn)))
 
     def train_step(self, data: Tensor):
         """Note that data is the training batch yielded by the data.dataset
@@ -139,6 +108,8 @@ class LAE(keras.Model):
         p_idx = tf.concat([tf.range(self._n_particles, dtype=tf.int64)
                            for _ in range(self._train_batch_size)], axis=0)
         lv_idx = tf.stack([p_idx, d_idx], axis=1)
+
+        self._latent_var_batch.assign(self._train_latent_variables.gather_nd(lv_idx))
 
         with tf.GradientTape(persistent=True) as tape:
             # Compute log of model density:
