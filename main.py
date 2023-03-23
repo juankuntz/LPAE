@@ -11,7 +11,7 @@ x = x[:10000].astype('float32')[..., np.newaxis]
 data = tf.data.Dataset.from_tensor_slices(x)
 
 # Setup model:
-lr = 1e-3
+lr = 1e-2
 lae = models.LAE(latent_var_dim=2)
 lae.compile(lv_learning_rate=lr, n_particles=2,
             optimizer=tf.keras.optimizers.RMSprop(learning_rate=lr),
@@ -21,7 +21,7 @@ log_dir = "logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 history = lae.fit(data=data, epochs=1, batch_size=64, callbacks=[tb])
 
-i = 4
+i = 0
 samples = lae.decode_posterior_samples(n_samples=3, index=i)
 images = [x[i, ..., 0]] + [samples[i, ...].numpy()[..., 0] for i in range(samples.shape[0])]
 grid_size = math.ceil(len(images) ** (1/2))
