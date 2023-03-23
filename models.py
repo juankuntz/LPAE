@@ -84,12 +84,22 @@ class LAE(keras.Model):
             self._postprocessor.adapt(data)
 
         # Add particle and data indices to dataset:
-        data = self._add_indices_to_dataset(data, self._n_particles)
+        # data = self._add_indices_to_dataset(data, self._n_particles)
+        # # Shuffle and batch data:
+        # self._train_batch_size = batch_size
+        # data = data.shuffle(shuffle_buffer_size)
+        # data = data.batch(self._n_particles * self._train_batch_size,
+        #                   drop_remainder=True)
+
+                # Add indices to dataset and shuffle:
+        # data_idx = [(i, dataset[i, ...]) for i
+        #             in range(self._training_set_size)]
+        # shuffle(data_idx)
+        data = Dataset.zip((Dataset.range(self._training_set_size), data))
         # Shuffle and batch data:
         self._train_batch_size = batch_size
         data = data.shuffle(shuffle_buffer_size)
-        data = data.batch(self._n_particles * self._train_batch_size,
-                          drop_remainder=True)
+        data = data.batch(self._train_batch_size, drop_remainder=True)
         # TODO: Right now particles are shuffled: we don't update 0, ..., N-1
         # once every step.
 
@@ -122,8 +132,12 @@ class LAE(keras.Model):
         """Note that data is the training batch yielded by the data.dataset
         object passed into super().fit() at the end of self.fit."""
         # Unpack datapoints and corresponding indices:
-        p_idx, d_idx, data_batch = data
+        d_idx, data_batch = data
+        d_idx = tf.repeat(d_idx, self._n_particles, axis=0)
+        data_batch = tf.repeat(data_batch, self._n_particles, axis=0)
         # Extract latent variables to be updated:
+        p_idx = tf.concat([tf.range(self._n_particles, dtype=tf.int64)
+                           for _ in range(self._train_batch_size)], axis=0)
         lv_idx = tf.stack([p_idx, d_idx], axis=1)
 
         with tf.GradientTape(persistent=True) as tape:
