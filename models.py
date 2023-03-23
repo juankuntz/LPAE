@@ -59,7 +59,7 @@ class LAE(keras.Model):
         super().compile(**kwargs)
 
     def fit(self,
-            data: Dataset | None = None,
+            data: Optional[Dataset] = None,
             reset_particles: bool = False,
             batch_size: int = 64,
             shuffle_buffer_size: int = 1024,
