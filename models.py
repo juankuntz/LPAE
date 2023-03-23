@@ -103,20 +103,20 @@ class LAE(keras.Model):
         # TODO: Delete latent variables at end of training to save memory?
 
     @staticmethod
-    def _add_indices_to_dataset(data: Dataset, np: int):
+    def _add_indices_to_dataset(data: Dataset, pn: int):
         """Add particle and data indices to dataset. In particular, if data
         equals [A, B, C] and there are two particles, data is set to
         [[0, 0, 0, 1, 1, 1], [0, 1, 2, 0, 1, 2], [A, B, C, A, B, C]];
         that is [particle_indices, data_indices, datapoints].
         Args:
             - data: dataset to which we need to add indices.
-            - np: number of particles.
+            - pn: particle number.
         Returns: data set with indices."""
         tss = data.cardinality().numpy()
-        return Dataset.zip((Dataset.range(np).map(lambda x: tf.repeat(x, tss)
+        return Dataset.zip((Dataset.range(pn).map(lambda x: tf.repeat(x, tss)
                                                   ).flat_map(
             lambda y: Dataset.from_tensor_slices(y)),
-                            Dataset.range(tss).repeat(np), data.repeat(np)))
+                            Dataset.range(tss).repeat(pn), data.repeat(pn)))
 
     def train_step(self, data: Tensor):
         """Note that data is the training batch yielded by the data.dataset
