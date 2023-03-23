@@ -1,16 +1,18 @@
 import tensorflow as tf
 from tensorflow import keras, Tensor, Variable
+from tensorflow.keras.layers import Layer
+from tensorflow.data import Dataset
 from decoders import get_simple_decoder
-from tensorflow_probability import distributions as tfd
-import matplotlib.pyplot as plt
+from tensorflow_probability.distributions import Distribution, MultivariateNormalDiag
+from typing import Optional
 
 
 class LAE(keras.Model):
 
     def __init__(self,
                  latent_var_dim: int = 32,
-                 decoder: keras.layers.Layer | None = None,
-                 prior: tfd.Distribution | None = None,
+                 decoder: Optional[Layer] = None,
+                 prior: Optional[Distribution] = None,
                  observation_noise: float = 1.):
         super().__init__()
         # TODO: Current decoder only allows for (28, 28) single channel images
@@ -22,7 +24,7 @@ class LAE(keras.Model):
         else:
             self.decoder = decoder()
         if prior is None:
-            self._prior = tfd.MultivariateNormalDiag(
+            self._prior = MultivariateNormalDiag(
                 loc=tf.zeros((self.latent_var_dim,)),
                 scale_diag=tf.ones((self.latent_var_dim,)))
         else:
@@ -40,8 +42,8 @@ class LAE(keras.Model):
     def compile(self,
                 lv_learning_rate: float = 1e-2,
                 n_particles: int = 1,
-                preprocessor: tf.keras.layers.Layer = None,
-                postprocessor: tf.keras.layers.Layer = None,
+                preprocessor: Layer = None,
+                postprocessor: Layer = None,
                 **kwargs):
         # Save latent variable learning rate, number of particles, and
         # preprocessor:
@@ -53,7 +55,7 @@ class LAE(keras.Model):
         super().compile(**kwargs)
 
     def fit(self,
-            data: tf.data.Dataset | None = None,
+            data: Dataset | None = None,
             reset_particles: bool = False,
             batch_size: int = 64,
             shuffle_buffer_size: int = 1024,
@@ -91,7 +93,7 @@ class LAE(keras.Model):
         # TODO: Delete latent variables at end of training to save memory?
 
     @staticmethod
-    def _add_indices_to_dataset(data: tf.data.Dataset, np: int):
+    def _add_indices_to_dataset(data: Dataset, np: int):
         """Add particle and data indices to dataset. In particular, if data
         equals [A, B, C] and there are two particles, data is set to
         [[0, 0, 0, 1, 1, 1], [0, 1, 2, 0, 1, 2], [A, B, C, A, B, C]];
@@ -101,12 +103,10 @@ class LAE(keras.Model):
             - np: number of particles.
         Returns: data set with indices."""
         tss = data.cardinality().numpy()
-        return tf.data.Dataset.zip((
-            tf.data.Dataset.range(np).map(
-                lambda x: tf.repeat(x, tss)).flat_map(
-                lambda y: tf.data.Dataset.from_tensor_slices(y)),
-            tf.data.Dataset.range(tss).repeat(np),
-            data.repeat(np)))
+        return Dataset.zip((Dataset.range(np).map(lambda x: tf.repeat(x, tss)
+                                                  ).flat_map(
+            lambda y: Dataset.from_tensor_slices(y)),
+                            Dataset.range(tss).repeat(np), data.repeat(np)))
 
     def train_step(self, data: Tensor):
         """Note that data is the training batch yielded by the data.dataset
@@ -161,10 +161,8 @@ class LAE(keras.Model):
             data = self._preprocessor(data)
         # Compute log prior probability:
         log_dens = self._prior.log_prob(latent_vars)
-        likelihood = tfd.MultivariateNormalDiag(
-            loc=self.decode(latent_vars),
-            scale_diag=tf.ones_like(data, dtype=tf.float32)
-        )
+        likelihood = MultivariateNormalDiag(loc=self.decode(latent_vars),
+            scale_diag=tf.ones_like(data, dtype=tf.float32))
         ll = likelihood.log_prob(data)
         log_dens += tf.math.reduce_sum(ll, axis=list(range(1, len(ll.shape))))
         return log_dens
