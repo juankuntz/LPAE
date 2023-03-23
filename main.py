@@ -9,18 +9,19 @@ import math
 x = x[:10000].astype('float32')[..., np.newaxis]
 data = tf.data.Dataset.from_tensor_slices(x)
 
-lae = models.LAE(latent_var_dim=32)
-lae.compile(lv_learning_rate=1e-3, n_particles=1,
-            optimizer=tf.keras.optimizers.RMSprop(),
-            preprocessor=tf.keras.layers.Normalization(axis=(0, 1)),
-            postprocessor=tf.keras.layers.Normalization(axis=(0, 1),
-                                                        invert=True),
+tf.keras.layers.Rescaling(scale=1./255)
+tf.keras.layers.Rescaling(scale=255.)
+
+lr = 1e-4
+lae = models.LAE(latent_var_dim=2)
+lae.compile(lv_learning_rate=lr, n_particles=1,
+            optimizer=tf.keras.optimizers.RMSprop(learning_rate=lr),
+            preprocessor=tf.keras.layers.Rescaling(scale=1./255),
+            postprocessor=tf.keras.layers.Rescaling(scale=255.),
             run_eagerly=True)
-print(lae.decoder.summary())
 log_dir = "logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-history = lae.fit(data=data, epochs=3, batch_size=128, callbacks=[tb])
-print(history.history)
+history = lae.fit(data=data, epochs=3, batch_size=64, callbacks=[tb])
 
 i = 4
 samples = lae.decode_posterior_samples(n_samples=3, index=i)
@@ -33,21 +34,3 @@ for i, image in enumerate(images):
 plt.show()
 
 a=1
-#
-# # Add particle and data indices to dataset:
-# data = lae._add_indices_to_dataset(x, 2)
-#
-#
-# # Shuffle and batch data:
-# data = data.shuffle(1024).batch(4)
-#
-# for elem in data.take(1):
-#     p_idx, d_idx, d_point = elem
-#
-# _train_latent_variables = tf.Variable(
-#     initial_value=lae._prior.sample((2, 3)),
-#     trainable=True)
-# # latent_var_batch = tf.gather(self._train_latent_variables,
-# #                                      indices=indices, axis=1)
-#
-# a=1

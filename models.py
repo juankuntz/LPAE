@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow import keras
+from tensorflow import keras, Tensor, Variable
 from decoders import get_simple_decoder
 from tensorflow_probability import distributions as tfd
 import matplotlib.pyplot as plt
@@ -81,7 +81,10 @@ class LAE(keras.Model):
         data = self._add_indices_to_dataset(data, self._n_particles)
         # Shuffle and batch data:
         self._train_batch_size = batch_size
-        data = data.shuffle(shuffle_buffer_size).batch(self._train_batch_size)
+        data = data.shuffle(shuffle_buffer_size).batch(self._n_particles *
+                                                       self._train_batch_size)
+        # TODO: Right now particles are shuffled: we don't update 0, ..., N-1
+        # once every step.
 
         # Run normal fit:
         return super().fit(x=data, **kwargs)
@@ -105,7 +108,7 @@ class LAE(keras.Model):
             tf.data.Dataset.range(tss).repeat(np),
             data.repeat(np)))
 
-    def train_step(self, data):
+    def train_step(self, data: Tensor):
         """Note that data is the training batch yielded by the data.dataset
         object passed into super().fit() at the end of self.fit."""
         # Unpack datapoints and corresponding indices:
@@ -115,7 +118,18 @@ class LAE(keras.Model):
         latent_var_batch = tf.Variable(
             initial_value=self._train_latent_variables.gather_nd(lv_idx))
 
-        # Compute log density:
+        # Take a step:
+        loss, param_grads, lv_update = self._forward_backward(latent_var_batch,
+                                                              data_batch)
+        self.optimizer.apply_gradients(zip(param_grads, self.decoder.trainable_variables))
+        self._train_latent_variables.scatter_nd_add(lv_idx, lv_update)
+        return {'loss': loss}
+
+    @tf.function
+    def _forward_backward(self,
+                          latent_var_batch: Variable,
+                          data_batch: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+
         with tf.GradientTape(persistent=True) as tape:
             # Compute log of model density:
             log_dens = tf.math.reduce_sum(self._log_density(data_batch,
@@ -123,22 +137,18 @@ class LAE(keras.Model):
             # Scale it for parameter loss (negative sign so we take an ascent
             # step rather than a descent step in the optimizer):
             loss = - log_dens / (self._n_particles * self._train_batch_size)
-            # self._training_set_size *
 
-        # Compute gradients:
-        dec_params = self.decoder.trainable_variables
-        dec_grads = tape.gradient(loss, dec_params)
-        lv_grads = tape.gradient(log_dens, latent_var_batch)
-        # Take a step:
-        self.optimizer.apply_gradients(zip(dec_grads, dec_params))
-        lv_lr = self._lv_learning_rate
-        self._train_latent_variables.scatter_nd_add(lv_idx, (
-                lv_lr * lv_grads + tf.sqrt(2 * lv_lr) * tf.random.normal(
-            shape=latent_var_batch.shape)))
-        return {'loss': loss}
-#abs(self._train_latent_variables).numpy().max()
-    def _log_density(self, data: tf.Tensor,
-                     latent_vars: tf.Variable) -> tf.Tensor:
+        # Compute parameter gradients:
+        param_grads = tape.gradient(loss, self.decoder.trainable_variables)
+
+        # Compute latent variables update:
+        lv_grads = tape.gradient(log_dens, latent_var_batch)  # Compute grads
+        lv_lr = self._lv_learning_rate  # Get learning rate
+        lv_update = lv_lr * lv_grads + tf.sqrt(2 * lv_lr) * tf.random.normal(
+            shape=latent_var_batch.shape)
+        return loss, param_grads, lv_update
+
+    def _log_density(self, data: Tensor, latent_vars: Variable) -> Tensor:
         """Returns model's log density evaluated at each matching (data,
         latent-variable) pair.
         Args:
@@ -153,13 +163,13 @@ class LAE(keras.Model):
         log_dens = self._prior.log_prob(latent_vars)
         likelihood = tfd.MultivariateNormalDiag(
             loc=self.decode(latent_vars),
-            scale_diag=1e-2 ** 2 * tf.ones_like(data, dtype=tf.float32)
+            scale_diag=tf.ones_like(data, dtype=tf.float32)
         )
         ll = likelihood.log_prob(data)
-        log_dens += tf.math.reduce_sum(ll, axis=list(range(1, ll.ndim)))
+        log_dens += tf.math.reduce_sum(ll, axis=list(range(1, len(ll.shape))))
         return log_dens
 
-    def decode(self, latent_vars: tf.Tensor) -> tf.Tensor:
+    def decode(self, latent_vars: Tensor) -> Tensor:
         """Returns decoded samples.
         Args:
             - latent_vars: tensor of dimensions (batch_size,
