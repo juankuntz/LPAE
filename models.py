@@ -3,8 +3,8 @@ from tensorflow import keras, Tensor, Variable
 from tensorflow.keras.layers import Layer
 from tensorflow.data import Dataset
 from decoders import get_simple_decoder
-from tensorflow_probability.distributions import Distribution, MultivariateNormalDiag
 from typing import Optional
+from tensorflow_probability import distributions as tfd
 
 
 class LAE(keras.Model):
@@ -12,7 +12,7 @@ class LAE(keras.Model):
     def __init__(self,
                  latent_var_dim: int = 32,
                  decoder: Optional[Layer] = None,
-                 prior: Optional[Distribution] = None,
+                 prior: Optional[tfd.Distribution] = None,
                  observation_noise: float = 1.):
         super().__init__()
         # TODO: Current decoder only allows for (28, 28) single channel images
@@ -24,7 +24,7 @@ class LAE(keras.Model):
         else:
             self.decoder = decoder()
         if prior is None:
-            self._prior = MultivariateNormalDiag(
+            self._prior = tfd.MultivariateNormalDiag(
                 loc=tf.zeros((self.latent_var_dim,)),
                 scale_diag=tf.ones((self.latent_var_dim,)))
         else:
@@ -36,8 +36,12 @@ class LAE(keras.Model):
         self._preprocessor = None  # Set when compile is called.
         self._postprocessor = None  # Set when compile is called.
         self._train_batch_size = None  # Set when fit is called.
-        self._train_latent_variables = None  # Built when fit is called. Should
-        # be of dims (n_particles, train_size, data_dims)
+        self._train_latent_variables = None  # All latent variables. Built when
+        # fit is called. Should be of dims (n_particles, train_size,
+        # latent_var_dims).
+        self._latent_var_batch = None  # Latent variables used in update. Built
+        # when fit is called. Should be of dims (n_particles * batch_size,
+        # latent_var_dims).
 
     def compile(self,
                 lv_learning_rate: float = 1e-2,
@@ -83,11 +87,17 @@ class LAE(keras.Model):
         data = self._add_indices_to_dataset(data, self._n_particles)
         # Shuffle and batch data:
         self._train_batch_size = batch_size
-        data = data.shuffle(shuffle_buffer_size).batch(self._n_particles *
-                                                       self._train_batch_size)
+        data = data.shuffle(shuffle_buffer_size)
+        data = data.batch(self._n_particles * self._train_batch_size,
+                          drop_remainder=True)
         # TODO: Right now particles are shuffled: we don't update 0, ..., N-1
         # once every step.
 
+        # Declare variables to hold latent variables updated in each step.
+        self._latent_var_batch = tf.Variable(initial_value=tf.zeros(
+            shape=(
+                self._n_particles * self._train_batch_size,
+                self.latent_var_dim)))
         # Run normal fit:
         return super().fit(x=data, **kwargs)
         # TODO: Delete latent variables at end of training to save memory?
@@ -115,38 +125,30 @@ class LAE(keras.Model):
         p_idx, d_idx, data_batch = data
         # Extract latent variables to be updated:
         lv_idx = tf.stack([p_idx, d_idx], axis=1)
-        latent_var_batch = tf.Variable(
-            initial_value=self._train_latent_variables.gather_nd(lv_idx))
-
-        # Take a step:
-        loss, param_grads, lv_update = self._forward_backward(latent_var_batch,
-                                                              data_batch)
-        self.optimizer.apply_gradients(zip(param_grads, self.decoder.trainable_variables))
-        self._train_latent_variables.scatter_nd_add(lv_idx, lv_update)
-        return {'loss': loss}
-
-    @tf.function
-    def _forward_backward(self,
-                          latent_var_batch: Variable,
-                          data_batch: Tensor) -> tuple[Tensor, Tensor, Tensor]:
 
         with tf.GradientTape(persistent=True) as tape:
             # Compute log of model density:
             log_dens = tf.math.reduce_sum(self._log_density(data_batch,
-                                                            latent_var_batch))
+                                                            self._latent_var_batch))
             # Scale it for parameter loss (negative sign so we take an ascent
             # step rather than a descent step in the optimizer):
             loss = - log_dens / (self._n_particles * self._train_batch_size)
 
-        # Compute parameter gradients:
+        # Compute gradients:
         param_grads = tape.gradient(loss, self.decoder.trainable_variables)
+        lv_grads = tape.gradient(log_dens, self._latent_var_batch)
 
-        # Compute latent variables update:
-        lv_grads = tape.gradient(log_dens, latent_var_batch)  # Compute grads
+        # Update parameters:
+        self.optimizer.apply_gradients(zip(param_grads,
+                                           self.decoder.trainable_variables))
+        # Update latent variables:
         lv_lr = self._lv_learning_rate  # Get learning rate
-        lv_update = lv_lr * lv_grads + tf.sqrt(2 * lv_lr) * tf.random.normal(
-            shape=latent_var_batch.shape)
-        return loss, param_grads, lv_update
+        noise = tf.random.normal(shape=tf.shape(self._latent_var_batch))
+        self._train_latent_variables.scatter_nd_add(lv_idx, lv_lr * lv_grads
+                                                    + tf.sqrt(2 * lv_lr) * noise)
+
+        return {'loss': loss}
+
 
     def _log_density(self, data: Tensor, latent_vars: Variable) -> Tensor:
         """Returns model's log density evaluated at each matching (data,
@@ -161,8 +163,9 @@ class LAE(keras.Model):
             data = self._preprocessor(data)
         # Compute log prior probability:
         log_dens = self._prior.log_prob(latent_vars)
-        likelihood = MultivariateNormalDiag(loc=self.decode(latent_vars),
-            scale_diag=tf.ones_like(data, dtype=tf.float32))
+        likelihood = tfd.MultivariateNormalDiag(loc=self.decode(latent_vars),
+                                                scale_diag=tf.ones_like(data,
+                                                                        dtype=tf.float32))
         ll = likelihood.log_prob(data)
         log_dens += tf.math.reduce_sum(ll, axis=list(range(1, len(ll.shape))))
         return log_dens
