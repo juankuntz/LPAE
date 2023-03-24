@@ -13,7 +13,7 @@ class LAE(keras.Model):
                  latent_var_dim: int = 32,
                  decoder: Optional[Layer] = None,
                  prior: Optional[tfd.Distribution] = None,
-                 observation_noise: float = 1.):
+                 observation_noise_std: float = 1.):
         super().__init__()
         # TODO: Current decoder only allows for (28, 28) single channel images
         # figure out how best to generalize this.
@@ -29,7 +29,7 @@ class LAE(keras.Model):
                 scale_diag=tf.ones((self.latent_var_dim,)))
         else:
             self._prior = prior
-        self.observation_noise = observation_noise
+        self._observation_noise_std = observation_noise_std
         self._training_set_size = None  # Set weh fit is called.
         self._n_particles = None  # Set when compile is called.
         self._lv_learning_rate = None  # Set when compile is called.
@@ -149,7 +149,7 @@ class LAE(keras.Model):
         # Compute log prior probability:
         log_dens = self._prior.log_prob(latent_vars)
         likelihood = tfd.MultivariateNormalDiag(loc=self.decode(latent_vars),
-                                                scale_diag=tf.ones_like(data,
+                                                scale_diag=self._observation_noise_std * tf.ones_like(data,
                                                                         dtype=tf.float32))
         ll = likelihood.log_prob(data)
         log_dens += tf.math.reduce_sum(ll, axis=list(range(1, len(ll.shape))))

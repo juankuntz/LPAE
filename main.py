@@ -4,22 +4,27 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+from tensorflow_probability import distributions as tfd
+
 
 # Load data:
 (x, y), (_, _) = tf.keras.datasets.mnist.load_data()
 x = x[:10000].astype('float32')[..., np.newaxis]
 data = tf.data.Dataset.from_tensor_slices(x)
 
+lv_dim = 2
+prior = tfd.MultivariateNormalDiag(loc=tf.zeros((lv_dim,)),
+                                   scale_diag=tf.ones((lv_dim,)))
 # Setup model:
-lr = 1e-2
-lae = models.LAE(latent_var_dim=2)
+lr = 1e-3/2
+lae = models.LAE(latent_var_dim=2, prior=prior, observation_noise_std=1e-2)
 lae.compile(lv_learning_rate=lr, n_particles=2,
             optimizer=tf.keras.optimizers.RMSprop(learning_rate=lr),
             preprocessor=tf.keras.layers.Rescaling(scale=1./255),
             postprocessor=tf.keras.layers.Rescaling(scale=255.))
 log_dir = "logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
-history = lae.fit(data=data, epochs=1, batch_size=64, callbacks=[tb])
+history = lae.fit(data=data, epochs=7, batch_size=64, callbacks=[tb])
 
 i = 0
 samples = lae.decode_posterior_samples(n_samples=3, index=i)
