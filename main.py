@@ -8,8 +8,11 @@ from tensorflow_probability import distributions as tfd
 
 
 # Load data:
-(x, y), (_, _) = tf.keras.datasets.mnist.load_data()
-x = x[:10000].astype('float32')[..., np.newaxis]
+(x, y), (_, _) = tf.keras.datasets.cifar10.load_data()
+x = tf.image.resize(x[:10000].astype('float32'), (28, 28))
+
+# (x, y), (_, _) = tf.keras.datasets.mnist.load_data()
+# x = x[:10000].astype('float32')[..., np.newaxis]
 data = tf.data.Dataset.from_tensor_slices(x)
 
 lv_dim = 2

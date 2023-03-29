@@ -43,6 +43,10 @@ class LAE(keras.Model):
         # when fit is called. Should be of dims (n_particles * batch_size,
         # latent_var_dims).
 
+    def call(self, **kwargs):
+        pass
+    # TODO: Turn the above into a decoder call?
+
     def compile(self,
                 lv_learning_rate: float = 1e-2,
                 n_particles: int = 1,
@@ -109,7 +113,8 @@ class LAE(keras.Model):
                            for _ in range(self._train_batch_size)], axis=0)
         lv_idx = tf.stack([p_idx, d_idx], axis=1)
 
-        self._latent_var_batch.assign(self._train_latent_variables.gather_nd(lv_idx))
+        self._latent_var_batch.assign(
+            self._train_latent_variables.gather_nd(lv_idx))
 
         with tf.GradientTape(persistent=True) as tape:
             # Compute log of model density:
@@ -130,10 +135,10 @@ class LAE(keras.Model):
         lv_lr = self._lv_learning_rate  # Get learning rate
         noise = tf.random.normal(shape=tf.shape(self._latent_var_batch))
         self._train_latent_variables.scatter_nd_add(lv_idx, lv_lr * lv_grads
-                                                    + tf.sqrt(2 * lv_lr) * noise)
+                                                    + tf.sqrt(
+            2 * lv_lr) * noise)
 
         return {'loss': loss}
-
 
     def _log_density(self, data: Tensor, latent_vars: Variable) -> Tensor:
         """Returns model's log density evaluated at each matching (data,
@@ -149,8 +154,9 @@ class LAE(keras.Model):
         # Compute log prior probability:
         log_dens = self._prior.log_prob(latent_vars)
         likelihood = tfd.MultivariateNormalDiag(loc=self.decode(latent_vars),
-                                                scale_diag=self._observation_noise_std * tf.ones_like(data,
-                                                                        dtype=tf.float32))
+                                                scale_diag=self._observation_noise_std * tf.ones_like(
+                                                    data,
+                                                    dtype=tf.float32))
         ll = likelihood.log_prob(data)
         log_dens += tf.math.reduce_sum(ll, axis=list(range(1, len(ll.shape))))
         return log_dens
@@ -162,6 +168,9 @@ class LAE(keras.Model):
             self.latent_var_dim).
         Returns: tensor of dimensions (batch_size, data_dims)."""
         return self.decoder(latent_vars)
+
+    def encode(self, datapoint: Tensor) -> Tensor:
+        pass
 
     def decode_posterior_samples(self, index: int = 0, n_samples: int = 1):
         n_samples = min(n_samples, self._n_particles)
