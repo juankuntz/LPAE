@@ -2,7 +2,6 @@ import tensorflow as tf
 from tensorflow import keras, Tensor, Variable
 from tensorflow.keras.layers import Layer
 from tensorflow.data import Dataset
-from decoders import get_simple_decoder
 from typing import Optional
 from tensorflow_probability import distributions as tfd
 
@@ -11,7 +10,7 @@ class ParticleAutoencoder(keras.Model):
     """A 'particle autoencoder' model to be trained with PGD (similar to in
     Sec. 3.3 of https://arxiv.org/abs/2204.12965).
     Args:
-        latent_var_dim: Dimension of the latent space: integer.
+        latent_dimensions: Dimension of the latent space: integer.
         decoder: The decoder, or generator, network to be used in the model:
             a `Layer` object mapping from the latent space to the data
             space.
@@ -23,20 +22,20 @@ class ParticleAutoencoder(keras.Model):
 
     # TODO: Add usage examples to docstring.
     def __init__(self,
-                 latent_var_dim: int = 32,
-                 decoder: Layer = None,
+                 latent_dimensions: int,
+                 decoder: Layer,
                  prior: Optional[tfd.Distribution] = None,
                  observation_noise_std: float = 1.):
         super().__init__()
         # TODO: Add type checks.
-        # TODO: Add checks for dimensional compatibility of latent_var_dim,
+        # TODO: Add checks for dimensional compatibility of _latent_dimensions,
         #  decoder, data, etc.
-        self.latent_var_dim = latent_var_dim
-        self._decoder = decoder()
+        self._latent_dimensions = latent_dimensions
+        self._decoder = decoder
         if prior is None:
             self._prior = tfd.MultivariateNormalDiag(
-                loc=tf.zeros((self.latent_var_dim,)),
-                scale_diag=tf.ones((self.latent_var_dim,)))
+                loc=tf.zeros((self._latent_dimensions,)),
+                scale_diag=tf.ones((self._latent_dimensions,)))
         else:
             self._prior = prior
         self._observation_noise_std = observation_noise_std
@@ -123,7 +122,7 @@ class ParticleAutoencoder(keras.Model):
         # Declare variables to hold latent variables updated in each step.
         self._latent_var_batch = tf.Variable(initial_value=tf.zeros(
             shape=(self._n_particles * self._train_batch_size,
-                   self.latent_var_dim)))
+                   self._latent_dimensions)))
         # Run normal fit:
         return super().fit(x=data, **kwargs)
         # TODO: Delete latent variables at end of training to save memory?
