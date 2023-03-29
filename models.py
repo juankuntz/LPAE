@@ -7,22 +7,32 @@ from typing import Optional
 from tensorflow_probability import distributions as tfd
 
 
-class LAE(keras.Model):
+class ParticleAutoencoder(keras.Model):
+    """A 'particle autoencoder' model to be trained with PGD (similar to in
+    Sec. 3.3 of https://arxiv.org/abs/2204.12965).
+    Args:
+        latent_var_dim: Dimension of the latent space: integer.
+        decoder: The decoder, or generator, network to be used in the model:
+            a `Layer` object mapping from the latent space to the data
+            space.
+        prior: Prior distribution over latent space: a `tfd.Distribution`
+            object. Optional: if left unspecified, it'll be set to an
+            isotropic zero-mean unit-variance Gaussian.
+        observation_noise_std: Standard deviation of observation noise: float.
+    """
 
+    # TODO: Add usage examples to docstring.
     def __init__(self,
                  latent_var_dim: int = 32,
-                 decoder: Optional[Layer] = None,
+                 decoder: Layer = None,
                  prior: Optional[tfd.Distribution] = None,
                  observation_noise_std: float = 1.):
         super().__init__()
-        # TODO: Current decoder only allows for (28, 28) single channel images
-        # figure out how best to generalize this.
         # TODO: Add type checks.
+        # TODO: Add checks for dimensional compatibility of latent_var_dim,
+        #  decoder, data, etc.
         self.latent_var_dim = latent_var_dim
-        if decoder is None:
-            self.decoder = get_simple_decoder(self.latent_var_dim)
-        else:
-            self.decoder = decoder()
+        self._decoder = decoder()
         if prior is None:
             self._prior = tfd.MultivariateNormalDiag(
                 loc=tf.zeros((self.latent_var_dim,)),
@@ -45,6 +55,7 @@ class LAE(keras.Model):
 
     def call(self, **kwargs):
         pass
+
     # TODO: Turn the above into a decoder call?
 
     def compile(self,
@@ -53,8 +64,8 @@ class LAE(keras.Model):
                 preprocessor: Layer = None,
                 postprocessor: Layer = None,
                 **kwargs):
-        # Save latent variable learning rate, number of particles, and
-        # preprocessor:
+        # Save latent variable learning rate, number of particles,
+        # preprocessor, and postprocessor:
         self._lv_learning_rate = lv_learning_rate
         self._n_particles = n_particles
         self._preprocessor = preprocessor
@@ -62,20 +73,36 @@ class LAE(keras.Model):
         # Run normal compile:
         super().compile(**kwargs)
 
+    def reset_particles(self, n_particles: Optional[int] = None) -> None:
+        """Resets particles used in training by drawing samples from the
+        prior.
+        Args:
+            n_particles: Number of particles: int. Optional: if left
+            unspecified the number of particles will remain unchanged.
+        """
+        if n_particles:
+            self._n_particles = n_particles
+        self._train_latent_variables = tf.Variable(
+            initial_value=self._prior.sample((self._n_particles,
+                                              self._training_set_size)))
+
     def fit(self,
             data: Optional[Dataset] = None,
-            reset_particles: bool = False,
             batch_size: int = 64,
             shuffle_buffer_size: int = 1024,
             **kwargs):
-        """data must yield batches of data of dimensions
-        (batch_size, data_dims)."""
-        # If particles uninitialized, or set to be reset, initialize them:
-        if (self._train_latent_variables is None) | reset_particles:
-            self._training_set_size = len(data)
-            self._train_latent_variables = tf.Variable(
-                initial_value=self._prior.sample((self._n_particles,
-                                                  self._training_set_size)))
+        """Fits model to data.
+        Args:
+            data: dataset: `Dataset` object that yields batches of data with
+                dimensions (batch_size, data_dims).
+            batch_size: Batch size to be used in training: int.
+            shuffle_buffer_size: Buffer size to be used for dataset shuffling:
+                int.
+        """
+        self._training_set_size = len(data)
+        # If particles uninitialized, initialize them:
+        if self._train_latent_variables is None:
+            self.reset_particles()
 
         # Adapt any pre-or-postprocessors:
         if self._preprocessor is not None:
@@ -101,9 +128,13 @@ class LAE(keras.Model):
         return super().fit(x=data, **kwargs)
         # TODO: Delete latent variables at end of training to save memory?
 
-    def train_step(self, data: Tensor):
-        """Note that data is the training batch yielded by the data.dataset
-        object passed into super().fit() at the end of self.fit."""
+    def train_step(self, data: Tensor) -> dict[str, float]:
+        """Implements PGD training step.
+        Args:
+             data: (indices, data) batch yielded by `Dataset` object  passed
+                into super().fit() at the end of self.fit: `Tensor` object.
+        """
+        # TODO: Rename loss in return and add description to docstring.
         # Unpack datapoints and corresponding indices:
         d_idx, data_batch = data
         d_idx = tf.repeat(d_idx, self._n_particles, axis=0)
@@ -125,12 +156,12 @@ class LAE(keras.Model):
             loss = - log_dens / (self._n_particles * self._train_batch_size)
 
         # Compute gradients:
-        param_grads = tape.gradient(loss, self.decoder.trainable_variables)
+        param_grads = tape.gradient(loss, self._decoder.trainable_variables)
         lv_grads = tape.gradient(log_dens, self._latent_var_batch)
 
         # Update parameters:
         self.optimizer.apply_gradients(zip(param_grads,
-                                           self.decoder.trainable_variables))
+                                           self._decoder.trainable_variables))
         # Update latent variables:
         lv_lr = self._lv_learning_rate  # Get learning rate
         noise = tf.random.normal(shape=tf.shape(self._latent_var_batch))
@@ -144,16 +175,22 @@ class LAE(keras.Model):
         """Returns model's log density evaluated at each matching (data,
         latent-variable) pair.
         Args:
-            - data: tensor of dimensions (batch_size * n_particles, data_dims).
-            - latent_vars: tensor of dimensions (batch_size * n_particles,
-            self.latent_var_dim).
-        Returns: tensor of dimensions (batch_size * n_particles)."""
-        # Normalize data batch:
+            data: Data batch (replicated across particles and flattened in the
+                particle dimension): `Tensor` object with dimensions
+                (batch_size * self._n_particles, data_dims).
+            latent_vars: Latent variable batch (for each particle, flattened in
+                the particle dimension): `Tensor` object with dimensions
+                (batch_size * self._n_particles, self._latent_var_dim).
+        Returns:
+            Log density evaluations: `Tensor` object with dimensions
+                (batch_size * n_particles).
+        """
+        # Preprocess data batch:
         if self._preprocessor is not None:
             data = self._preprocessor(data)
         # Compute log prior probability:
         log_dens = self._prior.log_prob(latent_vars)
-        likelihood = tfd.MultivariateNormalDiag(loc=self.decode(latent_vars),
+        likelihood = tfd.MultivariateNormalDiag(loc=self._decoder(latent_vars),
                                                 scale_diag=self._observation_noise_std * tf.ones_like(
                                                     data,
                                                     dtype=tf.float32))
@@ -162,21 +199,46 @@ class LAE(keras.Model):
         return log_dens
 
     def decode(self, latent_vars: Tensor) -> Tensor:
-        """Returns decoded samples.
+        """Decodes samples. If any postprocessor was specified in the .compile
+        call, the decoded samples are passed through it before being returned.
         Args:
-            - latent_vars: tensor of dimensions (batch_size,
-            self.latent_var_dim).
-        Returns: tensor of dimensions (batch_size, data_dims)."""
-        return self.decoder(latent_vars)
+            latent_vars: Batch of latent variables to be decoded: `Tensor`
+                object of dimensions (batch_size, self._latent_var_dim).
+        Returns:
+            Decoded samples: `Tensor` object with dimensions
+                (batch_size, data_dims).
+        """
+        if self._postprocessor is None:
+            return self._decoder(latent_vars)
+        else:
+            return self._postprocessor(self._decoder(latent_vars))
 
     def encode(self, datapoint: Tensor) -> Tensor:
         pass
 
-    def decode_posterior_samples(self, index: int = 0, n_samples: int = 1):
+    def decode_posterior_samples(self,
+                                 index: int = 0,
+                                 n_samples: int = 1) -> Tensor:
+        """Decodes latent variables corresponding to the specified index of
+        n_sample many particles used in training.
+        Args:
+            index: Index of datapoint whose latent variables are to be decoded:
+                int.
+            n_samples: Number of particles to decode: int.
+        Returns:
+            Decoded particles: `Tensor` object with dimensions
+                (n_samples, data_dims).
+        """
+        # We cannot return more samples than there are particles:
         n_samples = min(n_samples, self._n_particles)
         samples = self._train_latent_variables[:n_samples, index, :]
-        decoded_samples = self.decoder(samples)
-        if self._postprocessor is None:
-            return decoded_samples
-        else:
-            return self._postprocessor(decoded_samples)
+        return self.decode(samples)
+
+    def generate_fakes(self, n_fakes: int = 1) -> Tensor:
+        """
+        Args:
+
+        Returns:
+
+        """
+        return self.decode(self._prior.sample((n_fakes,)))
