@@ -253,7 +253,7 @@ class ParticleAutoencoder(keras.Model):
         # using a mixture of Gaussians and draw samples from the approximation.
 
         # If necessary, fit gmm:
-        if (not self._gmm) | n_components:
+        if (not self._gmm) | n_components.__bool__():
             if not n_components:
                 n_components = 300
             self._gmm = GaussianMixture(n_components=n_components)
