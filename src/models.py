@@ -4,6 +4,7 @@ from tensorflow.keras.layers import Layer
 from tensorflow.data import Dataset
 from typing import Optional
 from tensorflow_probability import distributions as tfd
+from sklearn.mixture import GaussianMixture
 
 
 class ParticleAutoencoder(keras.Model):
@@ -51,6 +52,8 @@ class ParticleAutoencoder(keras.Model):
         self._latent_var_batch = None  # Latent variables used in update. Built
         # when fit is called. Should be of dims (n_particles * batch_size,
         # latent_var_dims).
+        self._gmm = None  # GMM approximation to the aggregate posterior, set
+                          # when generate_fakes is called.
 
     def call(self, **kwargs):
         pass
@@ -202,7 +205,7 @@ class ParticleAutoencoder(keras.Model):
         call, the decoded samples are passed through it before being returned.
         Args:
             latent_vars: Batch of latent variables to be decoded: `Tensor`
-                object of dimensions (batch_size, self._latent_var_dim).
+                object of dimensions (batch_size, self._latent_dimensions).
         Returns:
             Decoded samples: `Tensor` object with dimensions
                 (batch_size, data_dims).
@@ -233,11 +236,38 @@ class ParticleAutoencoder(keras.Model):
         samples = self._train_latent_variables[:n_samples, index, :]
         return self.decode(samples)
 
-    def generate_fakes(self, n_fakes: int = 1) -> Tensor:
+    def generate_fakes(self,
+                       n_fakes: int = 1,
+                       from_prior: bool = False,
+                       n_components: int = None) -> Tensor:
         """
         Args:
 
         Returns:
 
         """
-        return self.decode(self._prior.sample((n_fakes,)))
+        if from_prior:
+            return self.decode(self._prior.sample((n_fakes,)))
+
+        # If not requested from prior, approximate the aggregate posterior
+        # using a mixture of Gaussians and draw samples from the approximation.
+
+        # If necessary, fit gmm:
+        if (not self._gmm) | n_components:
+            if not n_components:
+                n_components = 300
+            self._gmm = GaussianMixture(n_components=n_components)
+            n, m = self._n_particles, self._training_set_size
+            d = self._latent_dimensions
+            self._gmm.fit(tf.reshape(self._train_latent_variables,
+                                     [n * m, d]).numpy())
+
+        # Draw latent variables, decode, and return:
+        lvs, _ = self._gmm.sample(n_samples=n_fakes)
+        return self.decode(lvs)
+
+
+
+
+
+
