@@ -7,9 +7,9 @@ from tensorflow_probability import distributions as tfd
 from sklearn.mixture import GaussianMixture
 
 
-class ParticleAutoencoder(keras.Model):
-    """A 'particle autoencoder' model to be trained with PGD (similar to in
-    Sec. 3.3 of https://arxiv.org/abs/2204.12965).
+class LangevinParticleAutoencoder(keras.Model):
+    """A 'Langevin particle autoencoder' model to be trained with PGD (similar
+    to those in Sec. 3.3 of https://arxiv.org/abs/2204.12965).
     Args:
         latent_dimensions: Dimension of the latent space: integer.
         decoder: The decoder, or generator, network to be used in the model:
@@ -255,7 +255,7 @@ class ParticleAutoencoder(keras.Model):
         # If necessary, fit gmm:
         if (not self._gmm) | n_components.__bool__():
             if not n_components:
-                n_components = 300
+                n_components = 10
             self._gmm = GaussianMixture(n_components=n_components)
             n, m = self._n_particles, self._training_set_size
             d = self._latent_dimensions
