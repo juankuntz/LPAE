@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras, Tensor, Variable
 from tensorflow.keras.layers import Layer
+from tensorflow.keras.optimizers import Optimizer, Adam
 from tensorflow.data import Dataset
 from typing import Optional
 from tensorflow_probability import distributions as tfd
@@ -53,12 +54,20 @@ class LangevinParticleAutoencoder(keras.Model):
         # when fit is called. Should be of dims (n_particles * batch_size,
         # latent_var_dims).
         self._gmm = None  # GMM approximation to the aggregate posterior, set
-                          # when generate_fakes is called.
+        # when generate_fakes is called.
 
-    def call(self, **kwargs):
-        pass
-
-    # TODO: Turn the above into a decoder call?
+    def call(self, data: Tensor, **kwargs):
+        """
+        Pass batch of data through auto encoder (i.e., first encode and then
+        decode it).
+        Args:
+            data: Data batch: `Tensor` object of dimensions
+                (batch_size, data_dims).
+        Returns:
+            Batch of encoded-and-decoded data: `Tensor` object of dimensions
+                (batch_size, data_dims).
+        """
+        return self.decode(self.encode(data))
 
     def compile(self,
                 lv_learning_rate: float = 1e-2,
@@ -151,8 +160,8 @@ class LangevinParticleAutoencoder(keras.Model):
 
         with tf.GradientTape(persistent=True) as tape:
             # Compute log of model density:
-            log_dens = tf.math.reduce_sum(self._log_density(data_batch,
-                                                            self._latent_var_batch))
+            log_dens = tf.math.reduce_sum(self._log_density(
+                data_batch, self._latent_var_batch))
             # Scale it for parameter loss (negative sign so we take an ascent
             # step rather than a descent step in the optimizer):
             loss = - log_dens / (self._n_particles * self._train_batch_size)
@@ -215,8 +224,44 @@ class LangevinParticleAutoencoder(keras.Model):
         else:
             return self._postprocessor(self._decoder(latent_vars))
 
-    def encode(self, datapoint: Tensor) -> Tensor:
-        pass
+    def encode(self,
+               data: Tensor,
+               optimizer: Optimizer = Adam(),
+               n_steps: int = 1000) -> Tensor:
+        """
+        Encode batch of data.
+        Args:
+            data: Data batch: `Tensor` object of dimensions
+                (batch_size, data_dims).
+            optimizer: Optimizer to use for inference: `Optimizer` object.
+            n_steps: Number of optimizer steps to take for inference: int.
+        Returns:
+            Batch of latent variables: `Tensor` object with dimensions
+                (batch_size, latent dimensions).
+        """
+        # Freeze model parameters:
+        self.trainable = False
+
+        # # Set default optimizer if none specified:
+        # if not optimizer:
+        #     optimizer = keras.optimizers.Adam()
+
+        # Do any necessary preprocessing:
+        if self._preprocessor is not None:
+            data = self._preprocessor(data)
+
+        # Infer latent variables:
+        latent_vars = tf.Variable(initial_value=self._prior.sample((len(data),
+                                                                    )))
+        for _ in range(n_steps):
+            with tf.GradientTape() as tape:
+                loss = - tf.reduce_sum(self._log_density(data, latent_vars))
+            optimizer.minimize(loss, [latent_vars], tape)
+
+        # Unfreeze model parameters:
+        self.trainable = True
+
+        return latent_vars.read_value()
 
     def decode_posterior_samples(self,
                                  index: int = 0,
@@ -239,23 +284,28 @@ class LangevinParticleAutoencoder(keras.Model):
     def generate_fakes(self,
                        n_fakes: int = 1,
                        from_prior: bool = False,
-                       n_components: int = None) -> Tensor:
+                       n_components: Optional[int] = None) -> Tensor:
         """
+        Generates batch of fake datapoints by sampling latent variables and
+        mapping them throw the decoder.
         Args:
-
+            n_fakes: Number of fake datapoints: int.
+            from_prior: If set to true, the latent variables are drawn from
+                the prior. Otherwise, the aggregate posterior is approximated
+                using a mixture of Gaussians and the latent variables are drawn
+                from the mixture: bool.
+            n_components: Number of components in mixture.
         Returns:
-
+            Batch of fake data points: `Tensor` object with dimensions
+                (n_fakes, data_dims).
         """
         if from_prior:
             return self.decode(self._prior.sample((n_fakes,)))
 
-        # If not requested from prior, approximate the aggregate posterior
-        # using a mixture of Gaussians and draw samples from the approximation.
-
         # If necessary, fit gmm:
         if (not self._gmm) | n_components.__bool__():
             if not n_components:
-                n_components = 10
+                n_components = 100
             self._gmm = GaussianMixture(n_components=n_components)
             n, m = self._n_particles, self._training_set_size
             d = self._latent_dimensions
@@ -265,9 +315,3 @@ class LangevinParticleAutoencoder(keras.Model):
         # Draw latent variables, decode, and return:
         lvs, _ = self._gmm.sample(n_samples=n_fakes)
         return self.decode(lvs)
-
-
-
-
-
-
