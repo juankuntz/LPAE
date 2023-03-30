@@ -67,7 +67,7 @@ class LangevinParticleAutoencoder(keras.Model):
             Batch of encoded-and-decoded data: `Tensor` object of dimensions
                 (batch_size, data_dims).
         """
-        return self.decode(self.encode(data))
+        return self.decode(self.encode(data, **kwargs))
 
     def compile(self,
                 lv_learning_rate: float = 1e-2,
