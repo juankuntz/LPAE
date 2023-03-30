@@ -257,13 +257,30 @@ class LangevinParticleAutoencoder(keras.Model):
         # Infer latent variables:
         latent_vars = tf.Variable(initial_value=self._prior.sample((len(data),
                                                                     )))
+
+        inference_step = tf.function(self._inference_step
+                                     ).get_concrete_function(data,
+                                                             latent_vars,
+                                                             self._log_density,
+                                                             optimizer)
         for _ in range(n_steps):
-            inference_step(data)
+            inference_step(data, latent_vars)
 
         # Unfreeze model parameters:
         self.trainable = True
 
         return latent_vars.read_value()
+
+    @staticmethod
+    def _inference_step(data: Tensor,
+                        latent_vars: Variable,
+                        log_density,
+                        optimizer: Optimizer) -> Tensor:
+        with tf.GradientTape() as tape:
+            loss = - tf.reduce_sum(log_density(data, latent_vars))
+        grads = tape.gradient(loss, latent_vars)
+        optimizer.apply_gradients(zip([grads], [latent_vars]))
+        return loss
 
     def decode_posterior_samples(self,
                                  index: int = 0,
@@ -318,9 +335,3 @@ class LangevinParticleAutoencoder(keras.Model):
         lvs, _ = self._gmm.sample(n_samples=n_fakes)
         return self.decode(lvs)
 
-@tf.function
-def inference_step(data):
-    with tf.GradientTape() as tape:
-        loss = - tf.reduce_sum(self._log_density(data, latent_vars))
-    optimizer.minimize(loss, [latent_vars], tape)
-    return loss
