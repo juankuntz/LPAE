@@ -63,6 +63,7 @@ class LangevinParticleAutoencoder(keras.Model):
         Args:
             data: Data batch: `Tensor` object of dimensions
                 (batch_size, data_dims).
+            kwargs: Arguments to be passed on to self.encode.
         Returns:
             Batch of encoded-and-decoded data: `Tensor` object of dimensions
                 (batch_size, data_dims).
@@ -224,10 +225,7 @@ class LangevinParticleAutoencoder(keras.Model):
         else:
             return self._postprocessor(self._decoder(latent_vars))
 
-    def encode(self,
-               data: Tensor,
-               optimizer: Optimizer = Adam(),
-               n_steps: int = 1000) -> Tensor:
+    def encode(self, data: Tensor, **kwargs) -> Tensor:
         """
         Encode batch of data.
         Args:
@@ -242,9 +240,15 @@ class LangevinParticleAutoencoder(keras.Model):
         # Freeze model parameters:
         self.trainable = False
 
-        # # Set default optimizer if none specified:
-        # if not optimizer:
-        #     optimizer = keras.optimizers.Adam()
+        # Extract optimizer and n_steps from kwargs
+        if 'optimizer' in kwargs:
+            optimizer = kwargs['optimizer']
+        else:
+            optimizer = keras.optimizers.Adam()
+        if 'n_steps' in kwargs:
+            n_steps = kwargs['n_steps']
+        else:
+            n_steps = 1000
 
         # Do any necessary preprocessing:
         if self._preprocessor is not None:
@@ -254,9 +258,7 @@ class LangevinParticleAutoencoder(keras.Model):
         latent_vars = tf.Variable(initial_value=self._prior.sample((len(data),
                                                                     )))
         for _ in range(n_steps):
-            with tf.GradientTape() as tape:
-                loss = - tf.reduce_sum(self._log_density(data, latent_vars))
-            optimizer.minimize(loss, [latent_vars], tape)
+            inference_step(data)
 
         # Unfreeze model parameters:
         self.trainable = True
@@ -315,3 +317,10 @@ class LangevinParticleAutoencoder(keras.Model):
         # Draw latent variables, decode, and return:
         lvs, _ = self._gmm.sample(n_samples=n_fakes)
         return self.decode(lvs)
+
+@tf.function
+def inference_step(data):
+    with tf.GradientTape() as tape:
+        loss = - tf.reduce_sum(self._log_density(data, latent_vars))
+    optimizer.minimize(loss, [latent_vars], tape)
+    return loss
