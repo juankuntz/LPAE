@@ -1,5 +1,5 @@
 from tensorflow.keras.layers import Conv2DTranspose, Dense, Reshape
-from tensorflow.keras import Sequential
+from tensorflow.keras import Sequential, Input
 
 
 def get_simple_decoder(latent_var_dim: int):

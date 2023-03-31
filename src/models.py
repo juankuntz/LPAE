@@ -1,3 +1,6 @@
+import os
+import shutil
+
 import tensorflow as tf
 from tensorflow import keras, Tensor, Variable
 from tensorflow.keras.layers import Layer
@@ -6,6 +9,8 @@ from tensorflow.data import Dataset
 from typing import Optional
 from tensorflow_probability import distributions as tfd
 from sklearn.mixture import GaussianMixture
+import pickle
+import numpy as np
 
 
 class LangevinParticleAutoencoder(keras.Model):
@@ -14,8 +19,8 @@ class LangevinParticleAutoencoder(keras.Model):
     Args:
         latent_dimensions: Dimension of the latent space: integer.
         decoder: The decoder, or generator, network to be used in the model:
-            a `Layer` object mapping from the latent space to the data
-            space.
+            a `Layer` object mapping from the latent space to
+            the data space.
         prior: Prior distribution over latent space: a `tfd.Distribution`
             object. Optional: if left unspecified, it'll be set to an
             isotropic zero-mean unit-variance Gaussian.
@@ -35,10 +40,12 @@ class LangevinParticleAutoencoder(keras.Model):
         self._latent_dimensions = latent_dimensions
         self._decoder = decoder
         if prior is None:
+            self._default_prior = True
             self._prior = tfd.MultivariateNormalDiag(
                 loc=tf.zeros((self._latent_dimensions,)),
                 scale_diag=tf.ones((self._latent_dimensions,)))
         else:
+            self._default_prior = False
             self._prior = prior
         self._observation_noise_std = observation_noise_std
         self._training_set_size = None  # Set weh fit is called.
@@ -55,6 +62,33 @@ class LangevinParticleAutoencoder(keras.Model):
         # latent_var_dims).
         self._gmm = None  # GMM approximation to the aggregate posterior, set
         # when generate_fakes is called.
+        self._built = False  # True if model built, false otherwise.
+
+    def _build(self, data: Dataset):
+        """Builds model. That is, instantiates parameter and particle
+        variables and adapts pre and post processors to data.
+        Args:
+            - data: Training dataset: `Dataset` object."""
+        # Build decoder:
+        self._decoder.build((self._latent_dimensions,))
+
+        # If particles not built, build them:
+        self._training_set_size = len(data)
+        if self._train_latent_variables is None:
+            self.reset_particles()
+
+        # Build and adapt any pre-or-postprocessors:
+        data_shape = data.element_spec.shape
+        if self._preprocessor is not None:
+            self._preprocessor.build(data_shape)
+            # If the preprocessor needs adapting, adapt it.
+            if hasattr(self._preprocessor, 'adapt'):
+                self._preprocessor.adapt(data)
+        if self._preprocessor is not None:
+            self._preprocessor.build(data_shape)
+            # If the postprocessor needs adapting, adapt it.
+            if hasattr(self._postprocessor, 'adapt'):
+                self._postprocessor.adapt(data)
 
     def call(self, data: Tensor, **kwargs):
         """
@@ -111,19 +145,8 @@ class LangevinParticleAutoencoder(keras.Model):
             shuffle_buffer_size: Buffer size to be used for dataset shuffling:
                 int.
         """
-        self._training_set_size = len(data)
-        # If particles uninitialized, initialize them:
-        if self._train_latent_variables is None:
-            self.reset_particles()
-
-        # Adapt any pre-or-postprocessors:
-        if self._preprocessor is not None:
-            # If the preprocessor needs adapting, adapt it.
-            if hasattr(self._preprocessor, 'adapt'):
-                self._preprocessor.adapt(data)
-        # If the postprocessor needs adapting, adapt it.
-        if hasattr(self._postprocessor, 'adapt'):
-            self._postprocessor.adapt(data)
+        # Build all parameters and particles, adapt pre/postprocessors:
+        self._build(data)
 
         # Add indices to dataset and shuffle:
         data = Dataset.zip((Dataset.range(self._training_set_size), data))
@@ -322,7 +345,7 @@ class LangevinParticleAutoencoder(keras.Model):
             return self.decode(self._prior.sample((n_fakes,)))
 
         # If necessary, fit gmm:
-        if (not self._gmm) | n_components.__bool__():
+        if (not self._gmm) | bool(n_components):
             if not n_components:
                 n_components = 100
             self._gmm = GaussianMixture(n_components=n_components)
@@ -335,3 +358,107 @@ class LangevinParticleAutoencoder(keras.Model):
         lvs, _ = self._gmm.sample(n_samples=n_fakes)
         return self.decode(lvs)
 
+    def get_config(self):
+        config = {
+            'decoder_class': self._decoder.__class__,
+            '_latent_dimensions': self._latent_dimensions,
+            '_observation_noise_std': self._observation_noise_std,
+            '_training_set_size': self._training_set_size,
+            '_n_particles': self._n_particles,
+            '_lv_learning_rate': self._lv_learning_rate,
+            '_train_batch_size': self._train_batch_size,
+        }
+        if self._preprocessor is not None:
+            config['preprocessor_class'] = self._preprocessor.__class__
+        if self._postprocessor is not None:
+            config['postprocessor_class'] = self._postprocessor.__class__
+        return config
+
+    def save(self, path: str):
+        """Saves model.
+        Args:
+            - path: Save directory: str.
+            """
+        if not self._default_prior:
+            raise NotImplementedError('Save method does not support '
+                                      'custom priors.')
+        if self._decoder.__class__.__name__ not in {'Model', 'Sequential'}:
+            raise NotImplementedError('Save method only supports decoders that'
+                                      'are keras `Sequential` or `Model` '
+                                      'objects.')
+        # Create save directory (delete old if it exists):
+        if os.path.exists(path):
+            shutil.rmtree(path)
+        os.makedirs(path)
+        os.makedirs(path + 'decoder/')
+        # Save config:
+        config = self.get_config()
+        with open(path + 'config.pkl', 'w+b') as f:
+            pickle.dump(config, f)
+        # Save decoder:
+        with open(path + 'decoder/config.pkl', 'w+b') as f:
+            pickle.dump(self._decoder.get_config(), f)
+        self._decoder.save_weights(path + 'decoder/ckpt')
+        # Save latent variables:
+        np.save(path + 'train_latent_variables.npy',
+                self._train_latent_variables)
+        # If they exist, save preprocessor, postprocessor, and gmm:
+        if self._preprocessor is not None:
+            with open(path + 'preprocessor_config.pkl', 'w+b') as f:
+                pickle.dump(self._preprocessor.get_config(), f)
+        if self._postprocessor is not None:
+            with open(path + 'postprocessor_config.pkl', 'w+b') as f:
+                pickle.dump(self._postprocessor.get_config(), f)
+        if self._gmm is not None:
+            with open(path + 'gmm.pkl', 'w+b') as f:
+                pickle.dump(self._gmm, f)
+
+    @classmethod
+    def from_save(cls, path: str):
+        """Loads model.
+        Args:
+            - path: Save directory: str.
+            """
+        # Load config:
+        with open(path + 'config.pkl', 'rb') as f:
+            config = pickle.load(f)
+
+        # Instantiate decoder:
+        with open(path + 'decoder/config.pkl', 'rb') as f:
+            decoder_config = pickle.load(f)
+        decoder = config['decoder_class'].from_config(decoder_config)
+        decoder.load_weights(path + 'decoder/ckpt')
+
+        # Instantiate LangevinAutoencoder object:
+        lpae = cls(latent_dimensions=config['_latent_dimensions'],
+                   decoder=decoder,
+                   observation_noise_std=config['_observation_noise_std'])
+
+        # Load latent variables:
+        lpae._train_latent_variables = np.load(path
+                                               + 'train_latent_variables.npy')
+
+        # If they exist, load preprocessor, postprocessor, and gmm:
+        if os.path.exists(path + 'preprocessor_config.pkl'):
+            with open(path + 'preprocessor_config.pkl', 'rb') as f:
+                pre_cfg = pickle.load(f)
+            preprocessor = config['preprocessor_class'].from_config(pre_cfg)
+        if os.path.exists(path + 'postprocessor_config.pkl'):
+            with open(path + 'postprocessor_config.pkl', 'rb') as f:
+                post_cfg = pickle.load(f)
+            postprocessor = config['postprocessor_class'].from_config(post_cfg)
+        if os.path.exists(path + 'gmm.pkl'):
+            with open(path + 'gmm.pkl', 'rb') as f:
+                lpae._gmm = pickle.load(f)
+
+        # Compile object:
+        lpae.compile(lv_learning_rate=config['_lv_learning_rate'],
+                     n_particles=config['_n_particles'],
+                     preprocessor=preprocessor,
+                     postprocessor=postprocessor)
+
+        # Load remaining attributes:
+        lpae._training_set_size = config['_training_set_size']
+        lpae._train_batch_size = config['_train_batch_size']
+
+        return lpae
