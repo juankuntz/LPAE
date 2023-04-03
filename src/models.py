@@ -263,31 +263,29 @@ class LangevinParticleAutoencoder(keras.Model):
         # Freeze model parameters:
         self.trainable = False
 
-        # Extract optimizer and n_steps from kwargs
-        if 'optimizer' in kwargs:
-            optimizer = kwargs['optimizer']
+        # Extract step size and n_steps from kwargs
+        if 'step_size' in kwargs:
+            step_size = kwargs['step_size']
         else:
-            optimizer = keras.optimizers.Adam()
+            step_size = 1e-5
         if 'n_steps' in kwargs:
             n_steps = kwargs['n_steps']
         else:
             n_steps = 1000
 
-        # Do any necessary preprocessing:
-        if self._preprocessor is not None:
-            data = self._preprocessor(data)
-
         # Infer latent variables:
         latent_vars = tf.Variable(initial_value=self._prior.sample((len(data),
                                                                     )))
+        # lvs, _ = self._gmm.sample(n_samples=len(data))
+        # latent_vars = tf.Variable(initial_value=tf.cast(lvs, dtype=tf.float32))
 
         inference_step = tf.function(self._inference_step
                                      ).get_concrete_function(data,
                                                              latent_vars,
                                                              self._log_density,
-                                                             optimizer)
+                                                             step_size)
         for _ in range(n_steps):
-            inference_step(data, latent_vars)
+            print(inference_step(data, latent_vars))
 
         # Unfreeze model parameters:
         self.trainable = True
@@ -298,12 +296,15 @@ class LangevinParticleAutoencoder(keras.Model):
     def _inference_step(data: Tensor,
                         latent_vars: Variable,
                         log_density,
-                        optimizer: Optimizer) -> Tensor:
-        with tf.GradientTape() as tape:
-            loss = - tf.reduce_sum(log_density(data, latent_vars))
-        grads = tape.gradient(loss, latent_vars)
-        optimizer.apply_gradients(zip([grads], [latent_vars]))
-        return loss
+                        step_size: float) -> Tensor:
+        with tf.GradientTape() as tape_inf:
+            log_density_eval = tf.math.reduce_sum(log_density(data,
+                                                              latent_vars))
+        grads = tape_inf.gradient(log_density_eval, latent_vars)
+        noise = tf.random.normal(shape=tf.shape(latent_vars))
+        latent_vars.assign_add(step_size * grads
+                               + tf.sqrt(2 * step_size) * noise)
+        return log_density_eval
 
     def decode_posterior_samples(self,
                                  index: int = 0,
