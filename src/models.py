@@ -276,8 +276,6 @@ class LangevinParticleAutoencoder(keras.Model):
         # Infer latent variables:
         latent_vars = tf.Variable(initial_value=self._prior.sample((len(data),
                                                                     )))
-        # lvs, _ = self._gmm.sample(n_samples=len(data))
-        # latent_vars = tf.Variable(initial_value=tf.cast(lvs, dtype=tf.float32))
 
         inference_step = tf.function(self._inference_step
                                      ).get_concrete_function(data,
@@ -285,7 +283,7 @@ class LangevinParticleAutoencoder(keras.Model):
                                                              self._log_density,
                                                              step_size)
         for _ in range(n_steps):
-            print(inference_step(data, latent_vars))
+            inference_step(data, latent_vars)
 
         # Unfreeze model parameters:
         self.trainable = True
