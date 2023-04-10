@@ -84,8 +84,8 @@ class LangevinParticleAutoencoder(keras.Model):
             # If the preprocessor needs adapting, adapt it.
             if hasattr(self._preprocessor, 'adapt'):
                 self._preprocessor.adapt(data)
-        if self._preprocessor is not None:
-            self._preprocessor.build(data_shape)
+        if self._postprocessor is not None:
+            self._postprocessor.build(data_shape)
             # If the postprocessor needs adapting, adapt it.
             if hasattr(self._postprocessor, 'adapt'):
                 self._postprocessor.adapt(data)
