@@ -6,7 +6,7 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'Langevin Particle Autoencoders'
+project = 'LPAE'
 copyright = '2023, Juan Kuntz'
 author = 'Juan Kuntz'
 release = '0.0'
@@ -16,7 +16,10 @@ release = '0.0'
 
 extensions = [
     'myst_parser',
-    'sphinx.ext.duration'
+    'sphinx.ext.duration',
+    'sphinx.ext.autosectionlabel',
+    'nbsphinx',
+    'sphinx.ext.mathjax'
 ]
 
 templates_path = ['_templates']
