@@ -17,14 +17,15 @@ release = '0.0'
 extensions = [
     'myst_parser',
     'sphinx.ext.duration',
-    'sphinx.ext.autosectionlabel',
     'nbsphinx',
-    'sphinx.ext.mathjax'
+    'sphinx.ext.mathjax',
+    'sphinx.ext.autodoc'
 ]
-
+#,
+#    'sphinx.ext.autosummary'
+#     'sphinx.ext.autosectionlabel',
 templates_path = ['_templates']
 exclude_patterns = []
-
 
 
 # -- Options for HTML output -------------------------------------------------

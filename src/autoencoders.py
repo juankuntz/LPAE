@@ -11,21 +11,43 @@ import pickle
 import numpy as np
 
 
+#TODO: Add dimensionality checks for decoder vs data.
 class LPAE(keras.Model):
-    """A 'Langevin particle autoencoder' model to be trained with PGD (similar
-    to those in Sec. 3.3 of https://arxiv.org/abs/2204.12965).
-    Args:
-        latent_dimensions: Dimension of the latent space: integer.
-        decoder: The decoder, or generator, network to be used in the model:
-            a `Layer` object mapping from the latent space to
-            the data space.
-        prior: Prior distribution over latent space: a `tfd.Distribution`
-            object. Optional: if left unspecified, it'll be set to an
-            isotropic zero-mean unit-variance Gaussian.
-        observation_noise_std: Standard deviation of observation noise: float.
     """
+    A 'Langevin particle autoencoder' model grouping a prior distribution, a
+    decoder, and a set of particles into a keras.Model-like object with
+    training/inference features.
 
-    # TODO: Add usage examples to docstring.
+
+    Parameters
+    ----------
+    latent_dimensions: int
+        Dimension of the latent space.
+    decoder: tensorflow.keras.Layer
+        The decoder, or generator, network mapping from the latent space to
+        the data space.
+    prior: tensorflow_probability.distributions.Distribution or None
+        Prior distribution over latent space. Defaults to an isotropic
+        zero-mean unit-variance Gaussian.
+    observation_noise_std: float
+        Standard deviation of observation noise. Defaults to one.
+
+
+    Notes
+    -----
+    ...
+
+
+    Examples
+    ---------
+    ...
+
+    >>> model = autoencoders.LPAE
+    super AE!
+
+    Methods
+    -------
+    """
     def __init__(self,
                  latent_dimensions: int,
                  decoder: Layer,
@@ -65,8 +87,12 @@ class LPAE(keras.Model):
     def _build(self, data: Dataset):
         """Builds model. That is, instantiates parameter and particle
         variables and adapts pre and post processors to data.
-        Args:
-            - data: Training dataset: `Dataset` object."""
+
+        Parameters
+        ----------
+        data: tensorflow.data import Dataset object
+            Training dataset.
+        """
         # Build decoder:
         self._decoder.build((self._latent_dimensions,))
 
@@ -90,24 +116,50 @@ class LPAE(keras.Model):
 
     def call(self, data: Tensor, **kwargs):
         """
-        Pass batch of data through auto encoder (i.e., first encode and then
+        Pass batch of data through the autoencoder (i.e., first encode and then
         decode it).
-        Args:
-            data: Data batch: `Tensor` object of dimensions
-                (batch_size, data_dims).
-            kwargs: Arguments to be passed on to self.encode.
-        Returns:
-            Batch of encoded-and-decoded data: `Tensor` object of dimensions
-                (batch_size, data_dims).
+
+        Parameters
+        ----------
+        data: tensorflow.Tensor of dimensions (batch_size, data_dims)
+            Batch of data.
+        kwargs:
+            Arguments to be passed on to self.encode.
+
+        Returns
+        -------
+        tensorflow.Tensor of dimensions (batch_size, data_dims).
+            Batch of encoded-and-then-decoded data
         """
         return self.decode(self.encode(data, **kwargs))
 
     def compile(self,
                 lv_learning_rate: float = 1e-2,
                 n_particles: int = 1,
-                preprocessor: Layer = None,
-                postprocessor: Layer = None,
+                preprocessor: Optional[Layer] = None,
+                postprocessor: Optional[Layer] = None,
                 **kwargs):
+        """
+        Configures model for training.
+
+        Parameters
+        ----------
+        lv_learning_rate: float
+            Learning rate used in the latent variable updates. Defaults to
+            0.01.
+        n_particles: int
+            Number of particles.
+        optimizer: tensorflow.keras.optimizers.Optimizer
+            Optimizer used to update model parameters.
+        preprocessor: tensorflow.keras.layers.Layer or None
+            Preprocessing layer to be applied to data prior to encoding. If the
+            layer has an adapt method, the method will be called on the
+            training set before training.
+        postprocessor: tensorflow.keras.layers.Layer or None
+            Postprocessing layer to be applied to decoded latent variables. If
+            the layer has an adapt method, the method will be called on the
+            training set before training.
+        """
         # Save latent variable learning rate, number of particles,
         # preprocessor, and postprocessor:
         self._lv_learning_rate = lv_learning_rate
@@ -118,11 +170,14 @@ class LPAE(keras.Model):
         super().compile(**kwargs)
 
     def reset_particles(self, n_particles: Optional[int] = None) -> None:
-        """Resets particles used in training by drawing samples from the
-        prior.
-        Args:
-            n_particles: Number of particles: int. Optional: if left
-            unspecified the number of particles will remain unchanged.
+        """
+        Resets particles used in training by drawing samples from the prior.
+
+        Parameters
+        ----------
+        n_particles: int or None
+            Number of particles. If None, the number of particles will remain
+            unchanged.
         """
         if n_particles:
             self._n_particles = n_particles
@@ -130,18 +185,28 @@ class LPAE(keras.Model):
             initial_value=self._prior.sample((self._n_particles,
                                               self._training_set_size)))
 
+    #TODO: Add description of training loss numbers.
     def fit(self,
-            data: Optional[Dataset] = None,
+            data: Dataset,
             batch_size: int = 64,
             shuffle_buffer_size: int = 1024,
             **kwargs):
-        """Fits model to data.
-        Args:
-            data: dataset: `Dataset` object that yields batches of data with
-                dimensions (batch_size, data_dims).
-            batch_size: Batch size to be used in training: int.
-            shuffle_buffer_size: Buffer size to be used for dataset shuffling:
-                int.
+        """
+        Trains model using the subsampled version of PGD described in the docs.
+
+        Parameters
+        ----------
+        data: tensorflow.dataset.Dataset object that yields batches of data with dimensions (batch_size, data_dims).
+            Training set.
+        batch_size: int
+            Batch size to be used in training. Defaults to 64.
+        shuffle_buffer_size: int
+            Buffer size to be used for dataset shuffling. Defaults to 1024.
+
+        Returns
+        -------
+        A tensorflow History object.
+            Its History.history attribute is a record of training loss values.
         """
         # Build all parameters and particles, adapt pre/postprocessors:
         self._build(data)
@@ -162,10 +227,14 @@ class LPAE(keras.Model):
         # TODO: Delete latent variables at end of training to save memory?
 
     def train_step(self, data: Tensor) -> dict[str, float]:
-        """Implements PGD training step.
-        Args:
-             data: (indices, data) batch yielded by `Dataset` object  passed
-                into super().fit() at the end of self.fit: `Tensor` object.
+        """
+        Implements PGD training step.
+
+        Parameters
+        ----------
+         data: tensorflow.Tensor
+            (indices, data) batch yielded by `Dataset` object  passed
+            into super().fit() at the end of self.fit.
         """
         # TODO: Rename loss in return and add description to docstring.
         # Unpack datapoints and corresponding indices:
@@ -204,19 +273,29 @@ class LPAE(keras.Model):
 
         return {'loss': loss}
 
+    #TODO: Add test step to monitor validation losses?
+
     def _log_density(self, data: Tensor, latent_vars: Variable) -> Tensor:
-        """Returns model's log density evaluated at each matching (data,
+        """
+        Returns model's log density evaluated at each matching (data,
         latent-variable) pair.
-        Args:
-            data: Data batch (replicated across particles and flattened in the
-                particle dimension): `Tensor` object with dimensions
-                (batch_size * self._n_particles, data_dims).
-            latent_vars: Latent variable batch (for each particle, flattened in
-                the particle dimension): `Tensor` object with dimensions
-                (batch_size * self._n_particles, self._latent_var_dim).
-        Returns:
-            Log density evaluations: `Tensor` object with dimensions
-                (batch_size * n_particles).
+
+        Parameters
+        -----------
+        data: tensorflow.Tensor with dimensions (batch_size
+        * self._n_particles, data_dims)
+            Data batch (replicated across particles and flattened in the
+            particle dimension).
+        latent_vars: tensorflow.Variable with dimensions (batch_size
+        * self._n_particles, self._latent_var_dim).
+            Latent variable batch (for all particles, flattened in the particle
+            dimension).
+
+
+        Returns
+        --------
+        tensorflow.Tensor with dimensions (batch_size * n_particles).
+            Tensor of log density evaluations.
         """
         # Preprocess data batch:
         if self._preprocessor is not None:
@@ -232,14 +311,20 @@ class LPAE(keras.Model):
         return log_dens
 
     def decode(self, latent_vars: Tensor) -> Tensor:
-        """Decodes samples. If any postprocessor was specified in the .compile
-        call, the decoded samples are passed through it before being returned.
-        Args:
-            latent_vars: Batch of latent variables to be decoded: `Tensor`
-                object of dimensions (batch_size, self._latent_dimensions).
-        Returns:
-            Decoded samples: `Tensor` object with dimensions
-                (batch_size, data_dims).
+        """
+        Decodes batch of latent variables. If any postprocessor was specified
+        in the .compile call, the decoded samples are passed through it before
+        being returned.
+
+        Parameters
+        -----------
+        latent_vars: tensorflow.Tensor of dimensions (batch_size, self._latent_dimensions).
+             Batch of latent variables to be decoded
+
+        Returns
+        --------
+        tensorflow.Tensor with dimensions (batch_size, data_dims)
+            Batch of decoded latent variables.
         """
         if self._postprocessor is None:
             return self._decoder(latent_vars)
@@ -248,15 +333,21 @@ class LPAE(keras.Model):
 
     def encode(self, data: Tensor, **kwargs) -> Tensor:
         """
-        Encode batch of data.
-        Args:
-            data: Data batch: `Tensor` object of dimensions
-                (batch_size, data_dims).
-            optimizer: Optimizer to use for inference: `Optimizer` object.
-            n_steps: Number of optimizer steps to take for inference: int.
-        Returns:
-            Batch of latent variables: `Tensor` object with dimensions
-                (batch_size, latent dimensions).
+        Encodes batch of data by running a ULA chain per datapoint in batch.
+
+        Parameters
+        -----------
+        data: tensorflow.Tensor of dimensions (batch_size, data_dims)
+            Batch of data.
+        n_steps: int
+            Number of ULA steps to take for encoding.
+        n_steps: int
+            ULA step size used to encode.
+
+        Returns
+        --------
+        tensorflow.Tensor with dimensions (batch_size, latent dimensions)
+            Batch of latent variables.
         """
         # Freeze model parameters:
         self.trainable = False
@@ -305,15 +396,21 @@ class LPAE(keras.Model):
     def decode_posterior_samples(self,
                                  index: int = 0,
                                  n_samples: int = 1) -> Tensor:
-        """Decodes latent variables corresponding to the specified index of
+        """
+        Decodes latent variables corresponding to the specified index of
         n_sample many particles used in training.
-        Args:
-            index: Index of datapoint whose latent variables are to be decoded:
-                int.
-            n_samples: Number of particles to decode: int.
-        Returns:
-            Decoded particles: `Tensor` object with dimensions
-                (n_samples, data_dims).
+
+        Parameters
+        -----------
+        index: int
+            Index of datapoint whose latent variables are to be decoded.
+        n_samples: int
+            Number of particles to decode.
+
+        Returns
+        -------
+        tensorflow.Tensor with dimensions (n_samples, data_dims)
+            Decoded particles.
         """
         # We cannot return more samples than there are particles:
         n_samples = min(n_samples, self._n_particles)
@@ -327,16 +424,24 @@ class LPAE(keras.Model):
         """
         Generates batch of fake datapoints by sampling latent variables and
         mapping them throw the decoder.
-        Args:
-            n_fakes: Number of fake datapoints: int.
-            from_prior: If set to true, the latent variables are drawn from
-                the prior. Otherwise, the aggregate posterior is approximated
-                using a mixture of Gaussians and the latent variables are drawn
-                from the mixture: bool.
-            n_components: Number of components in mixture.
-        Returns:
-            Batch of fake data points: `Tensor` object with dimensions
-                (n_fakes, data_dims).
+
+        Parameters
+        -----------
+        n_fakes: int
+            Number of fake datapoints.
+        from_prior: bool
+            If set to true, the latent variables are drawn from
+            the prior. Otherwise, the aggregate posterior is approximated
+            using a mixture of Gaussians (MoG) and the latent variables are
+            drawn from the mixture. Computing the MoG usually takes some time,
+            but once computed it's saved for later use.
+        n_components: int
+            Number of components in mixture.
+
+        Parameters
+        -----------
+        tensorflow.Tensor object with dimensions (n_fakes, data_dims)
+            Batch of fake data points.
         """
         if from_prior:
             return self.decode(self._prior.sample((n_fakes,)))
@@ -372,9 +477,13 @@ class LPAE(keras.Model):
         return config
 
     def save(self, path: str):
-        """Saves model.
-        Args:
-            - path: Save directory: str.
+        """
+        Saves model.
+
+        Parameters
+        ----------
+        path: str
+            Save directory.
             """
         if not self._default_prior:
             raise NotImplementedError('Save method does not support '
@@ -412,10 +521,19 @@ class LPAE(keras.Model):
 
     @classmethod
     def from_save(cls, path: str):
-        """Loads model.
-        Args:
-            - path: Save directory: str.
-            """
+        """
+        Loads model.
+
+        Parameters
+        ---------
+        path: str
+            Save directory
+
+        Returns
+        -------
+        LPAE object
+            Loaded model.
+        """
         # Load config:
         with open(path + 'config.pkl', 'rb') as f:
             config = pickle.load(f)
