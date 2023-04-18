@@ -1,10 +1,8 @@
 import os
 import shutil
-
 import tensorflow as tf
 from tensorflow import keras, Tensor, Variable
 from tensorflow.keras.layers import Layer
-from tensorflow.keras.optimizers import Optimizer, Adam
 from tensorflow.data import Dataset
 from typing import Optional
 from tensorflow_probability import distributions as tfd
@@ -13,7 +11,7 @@ import pickle
 import numpy as np
 
 
-class LangevinParticleAutoencoder(keras.Model):
+class LPAE(keras.Model):
     """A 'Langevin particle autoencoder' model to be trained with PGD (similar
     to those in Sec. 3.3 of https://arxiv.org/abs/2204.12965).
     Args:
