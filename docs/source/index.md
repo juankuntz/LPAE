@@ -11,12 +11,12 @@ implementation of the autoencoder models in
 '[Particle algorithms for maximum likelihood training of latent 
 variable models](https://proceedings.mlr.press/v206/kuntz23a.html)'.
 
-%```{toctree}
-%:caption: 'Contents:'
-%:maxdepth: 2
+```{toctree}
+:caption: 'Contents:'
+:maxdepth: 2
 
+```
 %API_reference
-%```
 
 ## Model
 
