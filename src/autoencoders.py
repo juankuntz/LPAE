@@ -12,12 +12,12 @@ import numpy as np
 
 
 #TODO: Add dimensionality checks for decoder vs data.
+#TODO: Add examples to doctrings.
 class LPAE(keras.Model):
     """
     A 'Langevin particle autoencoder' model grouping a prior distribution, a
     decoder, and a set of particles into a keras.Model-like object with
     training/inference features.
-
 
     Parameters
     ----------
@@ -31,19 +31,6 @@ class LPAE(keras.Model):
         zero-mean unit-variance Gaussian.
     observation_noise_std: float
         Standard deviation of observation noise. Defaults to one.
-
-
-    Notes
-    -----
-    ...
-
-
-    Examples
-    ---------
-    ...
-
-    >>> model = autoencoders.LPAE
-    super AE!
 
     Methods
     -------
@@ -68,7 +55,7 @@ class LPAE(keras.Model):
             self._default_prior = False
             self._prior = prior
         self._observation_noise_std = observation_noise_std
-        self._training_set_size = None  # Set weh fit is called.
+        self._training_set_size = None  # Set when fit is called.
         self._n_particles = None  # Set when compile is called.
         self._lv_learning_rate = None  # Set when compile is called.
         self._preprocessor = None  # Set when compile is called.
@@ -237,6 +224,8 @@ class LPAE(keras.Model):
             into super().fit() at the end of self.fit.
         """
         # TODO: Rename loss in return and add description to docstring.
+        # TODO: Can we speed the following using tf.gather like in
+        #  self.get_particles (together with tf.reshape to flatten)?
         # Unpack datapoints and corresponding indices:
         d_idx, data_batch = data
         d_idx = tf.repeat(d_idx, self._n_particles, axis=0)
@@ -273,7 +262,7 @@ class LPAE(keras.Model):
 
         return {'loss': loss}
 
-    #TODO: Add test step to monitor validation losses?
+    # TODO: Add test step to monitor validation losses?
 
     def _log_density(self, data: Tensor, latent_vars: Variable) -> Tensor:
         """
@@ -393,29 +382,92 @@ class LPAE(keras.Model):
                                + tf.sqrt(2 * step_size) * noise)
         return log_density_eval
 
-    def decode_posterior_samples(self,
-                                 index: int = 0,
-                                 n_samples: int = 1) -> Tensor:
+    def get_particles(self,
+                      index_batch=None,
+                      n_particles: Optional[int] = None) -> Tensor:
         """
-        Decodes latent variables corresponding to the specified index of
-        n_sample many particles used in training.
+        Gets particles for training datapoints indexed by indices in
+        index_batch.
 
         Parameters
         -----------
-        index: int
-            Index of datapoint whose latent variables are to be decoded.
-        n_samples: int
-            Number of particles to decode.
+        index_batch: integer containing array-like object with dimensions
+        (batch_size) or None
+            Batch of indices whose particles are to be fetched. If None,
+            particles are fetched for all indices.
+        n_particles: int or None
+            Number of particles to fetch per index. If None, all particles are
+            fetched.
 
         Returns
         -------
-        tensorflow.Tensor with dimensions (n_samples, data_dims)
+        tensorflow.Tensor with dimensions (batch_size, n_particles,
+        latent_var_dims)
+            Fetched particles.
+        """
+
+        # If index_batch not specified, set it to be that of all indices:
+        if index_batch is None:
+            index_batch = tf.range(self._training_set_size, dtype=tf.int64)
+        # If n_particles not specified, set it to be the number of particles:
+        if n_particles is None:
+            n_particles = self._n_particles
+
+        # Make sure index_batch is a tensor with int64 dtype:
+        if not tf.is_tensor(index_batch):
+            index_batch = tf.convert_to_tensor(index_batch, dtype=tf.int64)
+        if not (index_batch.dtype == tf.int64):
+            index_batch = tf.cast(index_batch, tf.int64)
+
+        # Get and return particles:
+        return tf.gather(self._train_latent_variables,
+                         index_batch, axis=1)[:n_particles, ...]
+
+    @staticmethod
+    def flatten_particles(particles: Tensor) -> Tensor:
+        """
+        Flattens the particle number and batch size dimensions of the particles
+        so that they can be efficiently fed into the decoder.
+
+        Parameters
+        -----------
+        particles: Tensor with dimensions (n_particles, batch_size,
+        latent_dimension)
+            Particle to be flattened.
+
+        Returns
+        -------
+        Flattened particles.
+        """
+
+        return tf.transpose(tf.reshape(tf.transpose(particles),
+                                           [particles.shape[2],
+                                            particles.shape[1]
+                                            * particles.shape[0]]))
+
+    def decode_particles(self, index_batch, n_particles: int = None) -> Tensor:
+        """
+        Decodes n_particles particles for each training datapoint indexed by
+        index_batch.
+
+        Parameters
+        -----------
+        index_batch: integer containing array-like object with dimensions
+        (batch_size) or None
+            Batch of indices of datapoints whose particles are to be fetched
+            and decoded.
+        n_particles: int or None
+            Number of particles to decode per index. If None, all particles are
+            decoded.
+
+        Returns
+        -------
+        tensorflow.Tensor with dimensions (batch_size * n_particles, data_dims)
             Decoded particles.
         """
-        # We cannot return more samples than there are particles:
-        n_samples = min(n_samples, self._n_particles)
-        samples = self._train_latent_variables[:n_samples, index, :]
-        return self.decode(samples)
+
+        particles = self.get_particles(index_batch, n_particles)
+        return self.decode(self.flatten_particles(particles))
 
     def generate_fakes(self,
                        n_fakes: int = 1,
@@ -550,8 +602,8 @@ class LPAE(keras.Model):
                    observation_noise_std=config['_observation_noise_std'])
 
         # Load latent variables:
-        lpae._train_latent_variables = np.load(path
-                                               + 'train_latent_variables.npy')
+        lpae._train_latent_variables = tf.Variable(
+            np.load(path + 'train_latent_variables.npy'))
 
         # If they exist, load preprocessor, postprocessor, and gmm:
         if os.path.exists(path + 'preprocessor_config.pkl'):
