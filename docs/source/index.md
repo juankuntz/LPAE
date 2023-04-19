@@ -78,13 +78,13 @@ E.4 for more details on these sorts of PGD variants.
 ## Installation
 
 To check out the repository out on Colab, follow the steps taken in 
-[this tutorial](notebooks/MNIST_tutorial). To use the code locally, download 
-the repository and create an environment with the required packages installed 
-(the code was tested on python 3.10):
+[this tutorial](https://github.com/juankuntz/LPAE/blob/master/notebooks/MNIST_tutorial.ipynb). 
+To use the code locally, download the repository and create an environment with
+the required packages installed (the code was tested on python 3.10):
 
 ```
-git clone https://github.com/juankuntz/LPAE.git
-cd LPAE
+git clone https://github.com/juankuntz/LPAE.git ./lpae
+cd lpae
 python -m venv lpae_env
 source lpae_env
 python -m pip install -r requirements.txt
@@ -92,7 +92,7 @@ python -m pip install -r requirements.txt
 
 ## Usage
 
-For a quick overview, check out [this tutorial](notebooks/MNIST_tutorial). 
+For a quick overview, check out [this tutorial](https://github.com/juankuntz/LPAE/blob/master/notebooks/MNIST_tutorial.ipynb). 
 For more info, see the {doc}`API_reference`.
 
 ## Citation
