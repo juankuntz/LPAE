@@ -13,6 +13,8 @@ import numpy as np
 
 #TODO: Add dimensionality checks for decoder vs data.
 #TODO: Add examples to doctrings.
+#TODO: Reshape internal particle representation to have dims
+# (batch, n_part, lv_dims)
 class LPAE(keras.Model):
     """
     A 'Langevin particle autoencoder' model grouping a prior distribution, a
@@ -420,8 +422,9 @@ class LPAE(keras.Model):
             index_batch = tf.cast(index_batch, tf.int64)
 
         # Get and return particles:
-        return tf.gather(self._train_latent_variables,
-                         index_batch, axis=1)[:n_particles, ...]
+        return tf.transpose(tf.gather(self._train_latent_variables,
+                                      index_batch, axis=1)[:n_particles, ...],
+                            [1, 0, 2])
 
     @staticmethod
     def flatten_particles(particles: Tensor) -> Tensor:
@@ -440,10 +443,8 @@ class LPAE(keras.Model):
         Flattened particles.
         """
 
-        return tf.transpose(tf.reshape(tf.transpose(particles),
-                                           [particles.shape[2],
-                                            particles.shape[1]
-                                            * particles.shape[0]]))
+        return tf.reshape(particles, [particles.shape[0] * particles.shape[1],
+                                      particles.shape[2]])
 
     def decode_particles(self, index_batch, n_particles: int = None) -> Tensor:
         """
