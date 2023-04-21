@@ -489,7 +489,7 @@ class LPAE(keras.Model):
             drawn from the mixture. Computing the MoG usually takes some time,
             but once computed it's saved for later use.
         n_components: int
-            Number of components in mixture.
+            Number of components in mixture. Defaults to 30.
 
         Parameters
         -----------
@@ -502,7 +502,7 @@ class LPAE(keras.Model):
         # If necessary, fit gmm:
         if (not self._gmm) | bool(n_components):
             if not n_components:
-                n_components = 100
+                n_components = 30
             self._gmm = GaussianMixture(n_components=n_components)
             n, m = self._n_particles, self._training_set_size
             d = self._latent_dimensions
