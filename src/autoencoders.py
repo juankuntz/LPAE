@@ -1,13 +1,13 @@
 import os
 import shutil
+import pickle
+from typing import Optional
 import tensorflow as tf
 from tensorflow import keras, Tensor, Variable
 from tensorflow.keras.layers import Layer
 from tensorflow.data import Dataset
-from typing import Optional
 from tensorflow_probability import distributions as tfd
 from sklearn.mixture import GaussianMixture
-import pickle
 import numpy as np
 
 
