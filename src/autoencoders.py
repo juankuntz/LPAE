@@ -325,6 +325,7 @@ class LPAE(keras.Model):
         return tf.reshape(decoded,
                           (batch_size, n_particles) + decoded.shape[1:])
 
+    # TODO: Test encode and decode with multiple particles.
     def encode(self, data: Tensor,
                n_steps: int = 1000,
                step_size: float = 1e-5,
@@ -337,11 +338,11 @@ class LPAE(keras.Model):
         data: tensorflow.Tensor of dimensions (batch_size, data_dims)
             Batch of data.
         n_steps: int
-            Number of ULA steps to taken to encode.
+            Number of ULA steps to taken to encode. Defaults to 1000.
         step_size: int
-            ULA step size used to encode.
+            ULA step size used to encode. Defaults to 1e-5.
         n_particles: int
-            Number of particles to generate.
+            Number of particles to generate. Defaults to 1.
 
         Returns
         --------
@@ -352,23 +353,27 @@ class LPAE(keras.Model):
         # Freeze model parameters:
         self.trainable = False
 
-        # Infer latent variables:
+        # Declare latent variables:
         latent_vars = tf.Variable(initial_value
-                                  =self._prior.sample((len(data),
-                                                       n_particles)))
-
+                                  =self._prior.sample((len(data) * n_particles,
+                                                       )))
+        # Repeat data across particles:
+        rdata = tf.repeat(data, n_particles, axis=0)
+        # Infer latent variables:
         inference_step = tf.function(self._inference_step
-                                     ).get_concrete_function(data,
+                                     ).get_concrete_function(rdata,
                                                              latent_vars,
                                                              self._log_density,
                                                              step_size)
         for _ in range(n_steps):
-            inference_step(data, latent_vars)
+            inference_step(rdata, latent_vars)
 
         # Unfreeze model parameters:
         self.trainable = True
 
-        return latent_vars.read_value()
+        return tf.reshape(latent_vars.read_value(), (data.shape[0],
+                                                     n_particles,
+                                                     self._latent_dimensions))
 
     @staticmethod
     def _inference_step(data: Tensor,
