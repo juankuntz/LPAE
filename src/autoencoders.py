@@ -309,20 +309,26 @@ class LPAE(keras.Model):
 
         Parameters
         -----------
-        latent_vars: tensorflow.Tensor of dimensions (batch_size, self._latent_dimensions).
+        latent_vars: tensorflow.Tensor of dimensions (batch_size, n_particles,
+        latent_dim).
              Batch of latent variables to be decoded
 
         Returns
         --------
-        tensorflow.Tensor with dimensions (batch_size, data_dims)
+        tensorflow.Tensor with dimensions (batch_size, n_particles, data_dims)
             Batch of decoded latent variables.
         """
-        if self._postprocessor is None:
-            return self._decoder(latent_vars)
-        else:
-            return self._postprocessor(self._decoder(latent_vars))
+        batch_size, n_particles, _ = latent_vars.shape
+        decoded = self._decoder(self.flatten_particles(latent_vars))
+        if self._postprocessor is not None:
+            decoded = self._postprocessor(decoded)
+        return tf.reshape(decoded,
+                          (batch_size, n_particles) + decoded.shape[1:])
 
-    def encode(self, data: Tensor, **kwargs) -> Tensor:
+    def encode(self, data: Tensor,
+               n_steps: int = 1000,
+               step_size: float = 1e-5,
+               n_particles: int = 1) -> Tensor:
         """
         Encodes batch of data by running a ULA chain per datapoint in batch.
 
@@ -331,31 +337,25 @@ class LPAE(keras.Model):
         data: tensorflow.Tensor of dimensions (batch_size, data_dims)
             Batch of data.
         n_steps: int
-            Number of ULA steps to take for encoding.
-        n_steps: int
+            Number of ULA steps to taken to encode.
+        step_size: int
             ULA step size used to encode.
+        n_particles: int
+            Number of particles to generate.
 
         Returns
         --------
-        tensorflow.Tensor with dimensions (batch_size, latent dimensions)
+        tensorflow.Tensor with dimensions (batch_size, n_particles,
+        latent dimensions)
             Batch of latent variables.
         """
         # Freeze model parameters:
         self.trainable = False
 
-        # Extract step size and n_steps from kwargs
-        if 'step_size' in kwargs:
-            step_size = kwargs['step_size']
-        else:
-            step_size = 1e-5
-        if 'n_steps' in kwargs:
-            n_steps = kwargs['n_steps']
-        else:
-            n_steps = 1000
-
         # Infer latent variables:
-        latent_vars = tf.Variable(initial_value=self._prior.sample((len(data),
-                                                                    )))
+        latent_vars = tf.Variable(initial_value
+                                  =self._prior.sample((len(data),
+                                                       n_particles)))
 
         inference_step = tf.function(self._inference_step
                                      ).get_concrete_function(data,
@@ -454,7 +454,7 @@ class LPAE(keras.Model):
         Parameters
         -----------
         index_batch: integer containing array-like object with dimensions
-        (batch_size) or None
+        (batch_size)
             Batch of indices of datapoints whose particles are to be fetched
             and decoded.
         n_particles: int or None
@@ -463,12 +463,11 @@ class LPAE(keras.Model):
 
         Returns
         -------
-        tensorflow.Tensor with dimensions (batch_size * n_particles, data_dims)
+        tensorflow.Tensor with dimensions (batch_size, n_particles, data_dims)
             Decoded particles.
         """
 
-        particles = self.get_particles(index_batch, n_particles)
-        return self.decode(self.flatten_particles(particles))
+        return self.decode(self.get_particles(index_batch, n_particles))
 
     def generate_fakes(self,
                        n_fakes: int = 1,
@@ -497,7 +496,7 @@ class LPAE(keras.Model):
             Batch of fake data points.
         """
         if from_prior:
-            return self.decode(self._prior.sample((n_fakes,)))
+            return self.decode(self._prior.sample((n_fakes, 1)))[:, 0, ...]
 
         # If necessary, fit gmm:
         if (not self._gmm) | bool(n_components):
@@ -511,7 +510,7 @@ class LPAE(keras.Model):
 
         # Draw latent variables, decode, and return:
         lvs, _ = self._gmm.sample(n_samples=n_fakes)
-        return self.decode(lvs)
+        return self.decode(lvs[:, tf.newaxis, :])[:, 0, ...]
 
     def get_config(self):
         config = {
