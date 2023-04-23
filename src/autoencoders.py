@@ -327,7 +327,7 @@ class LPAE(keras.Model):
 
     # TODO: Test encode and decode with multiple particles.
     def encode(self, data: Tensor,
-               n_steps: int = 1000,
+               n_steps: int = 100,
                step_size: float = 1e-5,
                n_particles: int = 1) -> Tensor:
         """
