@@ -71,7 +71,10 @@ for all $k=0,\dots,K-1$, where
 batch size $M_\mathcal{B}:=|\mathcal{B}|$,
 - {math}`(H_k)_{k=0}^{K-1}` diagonal matrices of learning rates (e.g. those 
 obtained with [RMSProp](https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/experimental/RMSprop)).
- 
+
+The particles are initialized by sampling the 'prior': {math}`X_0^{1,1},\dots,X_0^{N,M}` 
+are independently drawn from {math}`\mathcal{N}(0,I)`.
+
 See the [paper](https://proceedings.mlr.press/v206/kuntz23a.html)'s Appendix 
 E.4 for more details on these sorts of PGD variants.
 
@@ -93,6 +96,37 @@ python -m pip install -r requirements.txt
 ## Usage
 
 For a quick overview, check out [this tutorial](https://github.com/juankuntz/LPAE/blob/master/notebooks/MNIST_tutorial.ipynb). 
+In short, the model revolves around the LPAE class (defined in 
+/src/autoencoders.py) whose instances are models of the type described above. 
+It subclasses tensorflow.keras's Model class and, in as much as possible, 
+emulates its API. In particular, we
+
+- define the model using the class constructor,
+- set its training configuration with its compile method,
+- train it using its fit method,
+- save it using its save method (to load it, we use its from_save method),
+- implement stopping criteria, monitor the training, checkpoint, etc. using
+[callbacks](https://www.tensorflow.org/guide/keras/train_and_evaluate#using_callbacks).
+
+To define an LPAE instance, you must feed its constructor the dimension of the 
+latent space and the decoder, which can be any 
+[tensorflow.keras Layer object](https://www.tensorflow.org/api_docs/python/tf/keras/layers/Layer)
+mapping from the latent space to the data space (its output dimensions must 
+match up with those of the data later fed into the fit method for training). 
+Note that tensorflow.keras's [sequential](https://www.tensorflow.org/guide/keras/sequential_model)
+and [functional](https://www.tensorflow.org/guide/keras/functional) APIs give 
+simple ways to construct these objects. Optionally, you can also feed the 
+constructor the prior {math}`p(x)` (which can be any [tensorflow_probability 
+Distribution](https://www.tensorflow.org/probability/api_docs/python/tfp/distributions/Distribution)
+object representing a distribution over the latent space) and the observation 
+noise's standard deviation $\sigma^2$. If left unspecified, these default to a 
+zero-mean unit-variance isotropic Gaussian and {math}`0.01`, respectively.
+
+Additionally, you wish to preprocess the data in some way prior to feeding it to 
+the model or postprocess the model's output, you can bundle these operations
+together with the model using the compile method's preprocessor and 
+postprocessor arguments and tensorflow.keras's [preprocessor layers](https://www.tensorflow.org/guide/keras/preprocessing_layers).
+
 For more info, see the {doc}`API_reference`.
 
 ## Citation

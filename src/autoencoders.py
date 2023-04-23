@@ -41,7 +41,7 @@ class LPAE(keras.Model):
                  latent_dimensions: int,
                  decoder: Layer,
                  prior: Optional[tfd.Distribution] = None,
-                 observation_noise_std: float = 1.):
+                 observation_noise_std: float = 1e-2):
         super().__init__()
         # TODO: Add type checks.
         # TODO: Add checks for dimensional compatibility of _latent_dimensions,
