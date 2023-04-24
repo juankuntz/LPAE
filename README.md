@@ -3,7 +3,7 @@
 A simple and fast tensorflow implementation of the autoencoder models in 
 '[Particle algorithms for maximum likelihood training of latent 
 variable models](https://proceedings.mlr.press/v206/kuntz23a.html)'. For more 
-info and usage guidance, see the 
+info, see the 
 [docs](https://lpae.readthedocs.io/en/latest/).
 
 ## Citation
