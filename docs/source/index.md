@@ -122,10 +122,14 @@ object representing a distribution over the latent space) and the observation
 noise's standard deviation $\sigma^2$. If left unspecified, these default to a 
 zero-mean unit-variance isotropic Gaussian and {math}`0.01`, respectively.
 
-Additionally, you wish to preprocess the data in some way prior to feeding it to 
+Additionally, if you wish to preprocess the data in some way prior to feeding it to 
 the model or postprocess the model's output, you can bundle these operations
 together with the model using the compile method's preprocessor and 
 postprocessor arguments and tensorflow.keras's [preprocessor layers](https://www.tensorflow.org/guide/keras/preprocessing_layers).
+
+Lastly, note that when training with fit, you need to pass in the training set
+as a [tensorflow.data.Dataset](https://www.tensorflow.org/api_docs/python/tf/data/Dataset)
+object.
 
 For more info, see the {doc}`API_reference`.
 
