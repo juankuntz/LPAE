@@ -90,7 +90,7 @@ git clone https://github.com/juankuntz/LPAE.git ./lpae
 cd lpae
 python -m venv lpae_env
 source lpae_env
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
 ## Usage
