@@ -54,6 +54,12 @@ class LPAE(keras.Model):
                 loc=tf.zeros((self._latent_dimensions,)),
                 scale_diag=tf.ones((self._latent_dimensions,)))
         else:
+            if not isinstance(prior, tfd.Distribution):
+                raise TypeError('Model prior must be a tensorflow_probability'
+                                'Distribution.')
+            if prior.event_shape != tf.zeros((latent_dimensions,)).shape:
+                raise ValueError('Model prior event shape must match specified'
+                                 'latent dimensions.')
             self._default_prior = False
             self._prior = prior
         self._observation_noise_std = observation_noise_std
@@ -294,9 +300,10 @@ class LPAE(keras.Model):
         # Compute log prior probability:
         log_dens = self._prior.log_prob(latent_vars)
         likelihood = tfd.MultivariateNormalDiag(loc=self._decoder(latent_vars),
-                                                scale_diag=self._observation_noise_std * tf.ones_like(
-                                                    data,
-                                                    dtype=tf.float32))
+                                                scale_diag
+                                                =self._observation_noise_std
+                                                 * tf.ones_like(data, dtype
+                                                =tf.float32))
         ll = likelihood.log_prob(data)
         log_dens += tf.math.reduce_sum(ll, axis=list(range(1, len(ll.shape))))
         return log_dens
